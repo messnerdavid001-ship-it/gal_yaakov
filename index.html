@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hilltop Farm 3D</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: one full-bleed 3D scene; a quiet title card top-left, view chips along the bottom, labels pinned in the scene. Single early-morning look. */
+:root{
+  --sky:#8fb4e6; --ink:#14202b; --panel:rgba(18,28,38,.72); --panel-line:rgba(255,255,255,.14);
+  --text:#f2efe6; --muted:#c3cbd1; --sun:#f4c765; --label:rgba(18,28,38,.78);
+  --display:"Space Grotesk",system-ui,sans-serif; --body:"Inter",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--sky);color:var(--text);font-family:var(--body);overflow:hidden}
+#stage{position:relative;height:100%;width:100%;overflow:hidden;touch-action:none}
+canvas{display:block;width:100%;height:100%}
+.card{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));left:max(16px,env(safe-area-inset-left,0px));max-width:min(320px,calc(100% - 32px));
+  background:var(--panel);border:1px solid var(--panel-line);border-radius:10px;padding:12px 14px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.card h1{font-family:var(--display);font-size:1.15rem;font-weight:600;margin:0 0 2px;letter-spacing:.01em}
+.card .coords{font-size:.72rem;color:var(--sun);font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.card p{font-size:.78rem;line-height:1.45;color:var(--muted);margin:8px 0 0}
+.card button.link{background:none;border:0;color:var(--text);font:inherit;font-size:.75rem;text-decoration:underline;padding:6px 0 0;cursor:pointer}
+.bar{position:absolute;left:0;right:0;bottom:0;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;
+  padding:10px max(16px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.chip{font:500 .8rem var(--body);color:var(--text);background:var(--panel);border:1px solid var(--panel-line);border-radius:999px;padding:8px 13px;cursor:pointer;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.chip:hover{border-color:var(--sun)}
+.chip[aria-pressed="true"]{background:var(--sun);color:var(--ink);border-color:var(--sun)}
+.chip:focus-visible,.card button:focus-visible{outline:2px solid var(--sun);outline-offset:2px}
+#compass{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));right:max(16px,env(safe-area-inset-right,0px));width:46px;height:46px;border-radius:50%;
+  background:var(--panel);border:1px solid var(--panel-line);display:grid;place-items:center}
+#needle{width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:18px solid var(--sun);transform-origin:50% 70%}
+#compass span{position:absolute;top:2px;font:600 .6rem var(--display);color:var(--text)}
+.lbl{position:absolute;left:0;top:0;font:500 .7rem var(--body);color:var(--text);background:var(--label);padding:3px 7px;border-radius:5px;white-space:nowrap;
+  pointer-events:none;will-change:transform;border:1px solid var(--panel-line)}
+.lbl::after{content:"";position:absolute;left:50%;top:100%;width:1px;height:14px;background:var(--text);opacity:.6}
+#err{position:absolute;inset:auto 16px 50% 16px;text-align:center;font-size:.9rem;color:var(--ink)}
+@media (max-width:520px){.card p{display:none}.card.open p{display:block}.chip{padding:7px 10px;font-size:.74rem}}
+@media (min-width:521px){.card button.link{display:none}}
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="c" aria-label="3D model of the hilltop farm"></canvas>
+  <div id="labels"></div>
+  <div class="card" id="card">
+    <h1>Hilltop Farm 3D</h1>
+    <div class="coords">32.0048° N · 35.1005° E · yard 514 m</div>
+    <p>The ground is real elevation data for the 2 km × 2 km square around the farm (satellite radar survey, about 30 m detail), with contour lines every 10 m. Buildings, roads and trees are placed from your photos and videos, so their positions are approximate. Drag to orbit, pinch or scroll to zoom.</p>
+    <button class="link" id="more" type="button">About this model</button>
+  </div>
+  <div id="compass" aria-hidden="true"><span>N</span><div id="needle"></div></div>
+  <div class="bar">
+    <button class="chip" type="button" data-view="overview">Overview</button>
+    <button class="chip" type="button" data-view="hilltop">Hilltop view</button>
+    <button class="chip" type="button" data-view="yard">Farm yard</button>
+    <button class="chip" type="button" data-view="bench">Bench lookout</button>
+    <button class="chip" type="button" data-view="road">Across the road</button>
+    <button class="chip" type="button" id="lblbtn" aria-pressed="true">Labels</button>
+    <button class="chip" type="button" id="ctrbtn" aria-pressed="true">Contours</button>
+  </div>
+  <div id="err" hidden>The 3D view could not start in this browser.</div>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const stage = document.getElementById('stage'), canvas = document.getElementById('c');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true }); }
+catch (e) { document.getElementById('err').hidden = false; throw e; }
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const HAZE = 0xbfd3ea;
+scene.fog = new THREE.Fog(HAZE, 1800, 9000);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.5, 14000);
+
+/* ---------- helpers: world is x = east, n = north (z = -n), y = up, metres ---------- */
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const g = (dx, dn, sx, sn) => Math.exp(-(dx * dx) / (sx * sx) - (dn * dn) / (sn * sn));
+const sstep = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+const hash = (i, j) => { const s = Math.sin(i * 127.1 + j * 311.7) * 43758.5453; return s - Math.floor(s); };
+function vnoise(x, y) { const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  return (hash(i, j) * (1 - u) + hash(i + 1, j) * u) * (1 - v) + (hash(i, j + 1) * (1 - u) + hash(i + 1, j + 1) * u) * v; }
+const fbm = (x, y) => vnoise(x, y) * .55 + vnoise(x * 2.1, y * 2.1) * .3 + vnoise(x * 4.3, y * 4.3) * .15;
+
+/* real elevation: 81 x 81 samples, 25 m apart, rows north to south, half-metre steps above 330 m */
+const DEM = "6d6t7c7r848f8n8s8v8y8x8u8m897x7l796x6m6f6a6c6k6t71797d7d7a77746z6u6s6v73706u6n6d625t5i524m4h4o505e5y6k727d7q81898e8i8m8q8t8y979e9l9r9za3a6a7a8a8a9aaabaiaoauazb7bd6a6r777o838f8n8s8w8z8z8v8r8k8d847u7i77716x6v6z757c7l7r7u7v7s7m7h7c787e7k7m7h776x6r6k675q534m4g4l4y5f606g6q717f7t7x838a8b8f8k8r8z969f9o9s9v9za3a3a0a1a5abahanaub4ba6a6q757k808e8m8s8w91918y8x8y8s8m8e867v7p7n7i7g7j7p7x858e8j8e89847v7s7x858b877w7q7l7b6r685p504i4g4o505g5u616b6u787f7n7x8184888f8o8u959e9k9m9q9x9x9v9xa2a7abahaqb1b66c6n737k7z8a8i8q8u909495979896918v8s8k8a87817v7x82898m8y92908v8q8h8f8k8q8v8x8p8h89807f6r6a5j4s4k4o4t4y565f5p676k6s747g7p7v81888g8o8x989g9i9k9o9q9r9v9za4a9afaqb0b46f6m727k7x848c8m8u939a9c9e9h9e9c9c99938r8o8i8d8d8f8n8z9c9g9i9e999391949b9h9n9g968v8i817h6x665d504y4u4s4u4w555i5w676l6y7a7m7w858c8i8r919a9f9f9g9h9i9o9ua2a9afaqayb36p6p707e7r7y858h8w979d9e9h9k9i9h9j9i9f9795918w8v8x939d9m9t9w9u9o9l9j9l9ta5a9a39p9b8v8e807k6z6b5r5j5b534y4v4v535f5r666o717f7t83898f8m8t9398979695949b9m9ya9ahaqaxb1746y707a7l7u828f8w979c9e9h9i9i9i9k9m9l9k9i9f9d9c9g9m9u9za5a8a9a5a2a4a3acamarana59n9a8t8e807o756m6a605n5d595251565i5y6i6z7c7p7y848d8h8j8q8u8t8q8q8t8z9d9sa4aeaqavay7m7e797d7k7s818d8r94999c9e9g9i9k9n9q9r9q9p9p9p9q9va1a7aaaeahakakalaoapaub2b6b1ala29p9b8w8e807p7d716m6b615t5f55535d5w6f6v797h7p7y868786888a8988888c8o939k9yaaakaoaq807u7o7m7n7s808c8p8z989c9e9e9h9k9p9u9v9v9w9x9y9za4a9adagajanasauawb0b3b6babebbb1aia29t9c8s8c817r7j7a746w6i5v58525a5r696p70787f7l7s7t7q7p7p7n7m7m7s898r9b9qa0a5aaac8482807v7t7w838f8q8y969c9e9e9f9k9p9u9w9w9ya3a7a9acafaialanatayb0b2b6babcbfbgbibaauafa39n938n8c827w7s7m7d6w6a5m54575k616e6p6w70727778777571706z727a7q8a8q969f9j9o9t858584838183898k8r8x93999c9e9g9j9n9r9v9va0a3a9aeaialanapasayb1b2b5b9bcbfbjbjblbcazanad9x9d8y8q8h89837u7i746m615d565d5n606a6g6i6i6j6k6k6i6f6f6f6n6x787n7z8d8m8s8z958585858688898d8l8r8w9194979c9f9h9l9q9s9v9za1a5adakamanaravb0b1b2b5b8bdbgbjbmbnbfb4auapac9s9f958w8m8b7z7o7d6x6a5q5a575a5k5u5y5y605z605y5x5y5z62696k6s717d7m7t828b8i82838587898b8f8n8s8w8x9194999f9i9m9o9q9t9x9ya2a8afaiakasaxazb0b1b3b7babcbibobnbkbbb6b3auada09r9e8z8j837p7f726j625m58545a5g5j5j5l5l5m5n5n5o5q5t5v616a6j6s70777h7q7y7z818487898e8j8o8t8u8x90949a9f9i9j9l9p9s9w9xa0a4aaaeahaoauaxayayb1b4b5b8bfblbmblbibfbeb5aqaea69w9c8r8c7u7f736m675u5e5a585c5d5g5h5l5m5q5q5p5r5p5m5n5x646d6j6p6y777g7y8184888b8f8m8o8s8u8x92979a9e9d9c9f9j9p9x9za1a5aaadagalarauawavaxazb0b3babfbibibhbfbdb8axanaha69k918i7x7e726l6a5z5o5l5k5l5n5r5v5z6264636467625x5u5v5y62646b6f6l6v7w8084898b8f8l8o8r8u8x949799999695979d9qa0a5a5a8abafagajaoararaqataxayb1b6bcbfbgbdbbbab7b4axaqac9s988k7y7e706o6e6660606264686d6j6o6q6o6n6s6u6s6n6g696868646462656c7w7x8185898e8i8o8r8u8y929393908x90969g9ua3a8a9abaeafagaiajalalalaoauaxb0b3b9bdbebdbabab9b6b0apad9x978j7y7g736s6m6h6e6f6h6m6s72797d7e7d7i7l7l7j7e766z6u6s6j6a6461647t7s7w81888e8h8m8r8v8y8y8x8t8p8q8y999o9xa4a9abaeagagafaeadadahagajapaub0b4b8bbbdbcb9b7b6b0ataja79s928d7x7n7a706x6x6w6t6x6z7a7m7v7z83888e8h8d87827x7p7i776z6r6h6c687m7m7r7x858c8h8k8o8s8t8s8n8j8h8j8t999p9ya3a8acagaiagaeaaa6a6a9aaacahaqazb6bbbdbbbcb7b4ayaqalaea19k8x8b7z7u7k7a797b7b7b7g7n7y858c8j8p8u9094928w8t8q8f837p7h7b726v6l7d7e7j7q7z878c8d8h8j8k8i8b85878d8m949l9wa2a8aeahaiafaba6a09y9za1a5acapb2bcbibjbebbb5b0atakafa99x9f8w8e85837y7u7t7v7v7y848b8k8r8u929a9g9j9n9r9o9h9a908o88827y7n7e7072747b7h7p7z828083848584807v7w848g8x9e9sa0a8aeagagada9a29t9o9p9sa0aeavb8bgbmbobjbdb7b1asalaea89v9g918p8j8k8k8l8l8l8l8l8o8x949b9g9p9ya4a7abaiaha79x9l998w8n8l8a7z7h6r6t6x737b7j7l7k7l7n7o7p7m7k7m7x8b8q959j9ua3aaadaca8a29t9k9e9h9o9zahb1bdblbpbrbmbjbdb4avanahab9z9l9e9894979c9e9g9g9d9c9b9h9o9va3adamasaxb2b8b7axaja69v9j98928t8i816e6d6g6m6u6z6z717477777574757a7n7z8g8r939h9sa0a4a19v9p9h9a989b9la0aib3bgbobsbubrbmbgb7axaqakaga69w9s9q9p9ua3a6a5a6a4a4a1a5abagalaub3b9bgblbobmbcayanafa19r9e958v8g625z60666a6d6g6i6k6m6m6l6n6q6v767k808d8n909a9k9n9k9h9b938x8y969i9wadaybdblbqbtbpblbfb4auanamakaaa4a19za1a7agakalalalanakanaoatayb5babibpbvbwbrbjb8ayaqaia49o9e948n5n5l5n5q5r5v5z5z626362676a6f6k6s737i7x868h8t9296948z8v8m8h8m8y9a9pa6aob0babhbkbibeb7axaqakakahacaaa7a7aaadalapasatasauauauauawb1b8bdbhbnbsbubpbibbb5awapaga09l988o59575b5e5g5l5o5r5r5t5t5z62686b6h6p747i7r818d8l8n8n8k8f8783898m8z9e9ta7aharb0b6b5b3axaqakagafaca9a9acafagajalaqauauauatararatauaxb4babdbfbgbjbibcb7b4axaqaia49o9a8n5051585e5i5m5r5x5w5y5x5z6365686c6e6o717a7i7t7y8183837y7u7s7x898l8z9a9m9va4agamanamahada8a5a6a6a6a6acagakamaoaparatasapalakamaqataxb2b4b4b5b6b7b4b0ayauamada29o998q4v535h5s5w5z676b6c6d6d6c6f6e6f6f6d6i6o6u707a7d7h7n7n7m7m7l7p7y878j8w949d9m9xa5a5a19y9x9w9u9ya2a5a6a9agalamaoaoaqasaqalaiafahamaoasavawawawaxayavauasanaea79y9n978u4v585u6a6f6m6t6v6y6z707173706v6p6m6k6i6k6q6v70767b7b7c7f7g7j7n7u848f8o8y959f9l9m9i9h9k9k9m9r9ya4a5a9aeaiakalamaoaoamagacacafajalanaratarararapamamakaea7a29t9j9b95535i676r71797g7k7k7l7n7s7t7n7g79726t6n6n6o6q6w6z7476777a7d7i7j7m7s7y8a8k8s909596949497999d9j9r9za2a7aaaeaiaiakajahaca8a8a9aeahakakanaqaqaqamaiafaeaaa39z9u9q9m9k9m5g5y6k747i7u81848482848b8c867y7s7i766z6w6u6t6u6y72787c7e7k7n7m7o7n7s828c8j8p8u8v8u8v8x92959a9h9q9w9za2a7acacabaaa8a4a2a1a3a8agakalapasasaramahaea9a39y9u9q9q9q9t9v5v6e6z7g7w898d8g8i8f8g8k8m8k8e887x7l7c7675727172777f7m7s7x80807y7w7z858a8d8i8l8m8m8l8n8u9193969e9l9o9s9za3a19z9z9z9x9w9wa0a5aeanasaxazayawaranahaba69y9t9q9s9v9ya2676r7a7s888i8k8o8q8o8o8o8r8r8n8i897u7l7f7d7d7d7f7l7t80888d8i8k8f8c8c8f8f8g8h8i8k8k8h8i8o8w8z90969a9c9h9q9t9q9p9q9q9p9r9v9za8aiatb1b5b7b6b4b2awapakafa49w9t9va0a3a96e717k818d8j8m8p8r8r8p8p8r8q8p8l8a7z7s7m7k7o7r7z888e8j8o8u92938z8v8p8q8p8p8q8q8q8q8n8m8r8w8x8y909293999h9i9h9g9k9k9m9q9wa4agasb2b9bebgbebebdb8b0asakaaa49z9za3a8ae6m777p858d8i8j8l8o8o8o8o8o8n8m8j8b827x7v7w7y868h8u9397999c9j9l9g9b9792908z929190929091949392939090939699999b9f9k9m9p9va2agarb1bcbkbrbsbrbrbrbkbab0aoagaba6a4a4a9af6q797s858c8d8e8h8i8j8j8l8j8i8i8g8984818286898i8v969g9k9p9q9v9x9t9q9n9h9a999a9a989b9e9g9g9e9c9a98999b9d9b9a9e9i9m9p9t9za7amaxb5bjbuc0c3c2c5c7c1bqbfb3avanahaaa7abai6w7d7t83878a8a8b8d8f8g8f8d8b8b89848284898d8k8r939e9k9q9v9ya2a5a4a29z9s9l9i9h9g9f9i9o9o9n9n9n9k9h9j9m9p9p9n9o9q9t9u9za3acamazbbbpc1c6cacccicncjc8bwbkbbayaoafabadak727g7s7z82868787898b8b88848381817y7x828a8i8p8w969f9n9r9wa1a6acadafaca59y9t9q9o9o9q9t9s9s9u9w9u9q9r9u9za09za0a1a1a3a8abagaob2bgbuc4c9cfcicocwcvclc8bubib4asakagaiaq747f7p7v7y818384868483807x7w7t7s7q7r7x878h8o8u959e9l9q9xa3a8afanapanafa6a29z9x9x9y9w9w9za0a3a3a19ya1a5a4a6a7a8a9adaialaoavb8blbvc4cbcicncrcwcycrcfbybib7ayapamapav787g7o7r7t7v7v7w7x7w7u7s7q7o7l7l7i7l7t858g8l8r929b9h9o9sa1acakatauanafaaa6a4a2a1a4a4a4a5a7a7a9a7a6a8a9a8a9abadagaoasatazb4bibqbxc4ccclcrctcxcxcrcgc2blbbb3avasavb07a7h7m7o7q7q7o7o7o7p7n7k7i7d7c7b7a7g7r848d8h8m8u92989h9p9xaaanataqaiaba7a6a2a3a5a7a7a8aaaaaaabacacadacabadafajanarauazb4bbbmbtbxc3cbckcrcucvcucpcfc3brbeb7azawaxb17a7e7g7i7k7k7i7f7f7e7e7c7772706z71797k7x87898c8k8t919b9k9ta5aiamajaba7a6a5a3a4a6a8aaacadaca9aaaeagafafafagajamaqasaub0b5bcbjbqbxc3c9cecjcocqcpclcec5btbibab0axazb4777879787878767474716z6x6t6q6n6m6p6z7a7m7u7x81898j8u949e9n9xa6aaa8a2a3a3a3a4a4a6a7aaadaeaca8aaadafagagaiakakanapasaub0b5babgbnbvc1c4c7cacfcmcnckcdc4bvbmbdb3b0b5bb6w6w6x6u6r6r6r6r6q6o6j6f6d6c6b6a6d6n707a7i7n7r7x898l8v979h9p9v9v9t9v9w9x9ya1a1a3a4a7a8aaaaaaaaaaadagagaiakakamaoatawazb3babibnbtbyc1c4c7cbcgcjcicac1bubpbgbab8bcbi6h6e6b6b6c6c6a6b6c6b646263636263666f6s717a7h7l7q808c8m8y989e9j9k9k9n9q9r9s9u9u9u9wa1a0a4a7a8a8a9abadaeahaiaiakaoasavawb0babjbnbqbvbxc0c4c7c9cbccc8c0bubpbjbfbgbgbl625v5r5s5w5v5s5r5t5s5r5t5x6063646a6h6p6x767e7k7o7v868f8o8z96999b9e9h9j9i9k9l9k9l9q9v9x9za2a3a3a6a8aaadaeaeaeaianaqaratazbabkblbnbqbtbwc2c4c4c5c5c4c1bvbpbmblbkbkbn5n5g5b5c5e5c57585c5f5l5q6066696d6h6k6q6y787d7g7o7v82898f8o8z9193979a9a9a9b9e9f9h9k9n9q9t9xa0a2a5a7a9abadacabaganaraqaraxb8bfbgbibmbpbtbzc3c2c2c2c2c0bwbsbpbpbpbobs5a53514z4z4w4s4v535c5m5z696e6k6p6p6s6v727a7d7h7p7w81858a8i8r8t8v8y92929192979b9e9e9h9k9n9r9wa2a5a8a9aaacaaa8acalaraqaqavb4b9bcbgblbpbsbwc1c2c2c1c0bzbwbvbubvbwbyc34y4s4q4o4n4m4n4t555l606e6k6o6x757575767b7g7k7n7r7w8183898h8n8p8p8s8v8x8v8y9397989a9c9e9h9l9r9xa2a6a7a6a8a7a7a8afamapaqatazb6bbbgbkbobrbtbyc2c1bzbybxbybwbwbzc2c7ce4m4j4g4f4g4k4o4y5f5y6i6u6x737f7o7o7n7n7r7u7w7y7w7y83868b8j8o8o8o8q8s8u8u8w9294929596989c9e9h9o9u9y9z9ya1a3a2a4a8aealaoasawb4babebjblbobrbubzbzbybybwbxbybzc2c5cbcj494948494f4o4x5c5t6c6u777f7l7u838687878a8b8c8e87868a8d8g8j8o8o8o8n8o8q8r8r8v8w8v8x8x909395989f9j9m9o9r9x9z9w9za2a5acajaqaub0b6bbbgbjbmbobtbwbvbvbxbwbwc0c3c5c8cccn3y4145494l4y5c5t696o737h7u81898l8u8x8v8v8t8v8v8n8h8i8l8l8l8m8m8l8h8i8j8k8j8j8j8l8n8n8p8s8x93989b9e9f9k9q9s9s9u9w9ya2abamaraub0b8bcbgbjbkbnbsbsbsbtbvbwbzc4c7cbcecm3s3z464f4t585o676m6z7e7t898j8u999k9k9i9d9b9e9d938s8p8r8r8o8n8k8h8d8c8c8b8a868485898b8c8f8k8t9298999b9d9g9h9k9p9q9n9ra1aeamapaub2b6b9bfbhbkbobrbnbobsbubxc3c6cbcecm3s404a4m515g5x6g6w7a7q878p939g9ya8a7a5a19z9w9t9j9692908x8u8p8k8f898887847y7s7n7m7r7v7v7y838b8o8u8z92929496989d9e9b9h9ta4acahanatawb0b7bcbfbkbmblblbpbqbubyc3c6cdck3x444i4w595q676p797p848l929ja0alauayawavaraiaba29p9h9b948y8s8m8f8986837v7n7f78737477797d7j7r80888h8j8m8q8q8s8w8y8z969h9r9za5aeakaqawb2b4b9bgbjbkbkblblbobubxc2c9cf414b4p545l646m757q878k8x9f9xakb1b9bcbgbjbjbeb1arad9w9k98928v8p8h8a847w7p7j776s6j6h6j6o6r6x767f7n7x8285888a88898a8f8n8w999j9sa2aeakasazb2b6bbbfbhbfbebfbiblbqbwc3c8484j4x5c5v6h707l888p909d9wadawbabgbkbpbvc1c0bsbgayab9r9c938y8s8k8a817r7j7f6v685x5x5x60646b6l6t727b7h7l7l7l7l7l7l7r828d8q929b9pa4abakaxb3b8babbb9b5b4b4b8bcbibqbtbz4g4n515i636p7a7v8i929h9yagaub4bebkbobtc1c8c7c4btb7aj9w9d938y8s8l897y7o7j7b6o5t5d5b5c5f5l5p5y676g6p6v6y6x6u6v6w6x747j7y8c8p8z9c9r9ya7amazb5b5b1avaraqataxb1b5bcbhbm4r4w585q6b6x7h858r9d9zahaub4babhbnbrbxc3c6c8c6bvbaam9z9e938y8s8j897x7p7m796j5l4y4p4p4w54575c5j5t62696b6a676666696j707g7v8b8n8y9a9l9va9anauasanafadaeahalanaqawb4b754595g5x6j757q8b8z9nabarb0b7bcbibrbvbxc1c5c8c5bsb8ana19g938w8p8i887x7q7o796d5g4p4a444b4k4p4t4x565g5n5q5n5n5l5l5n5y6g6u787p858i8v999l9yaaaeaca6a1a1a2a4a6a8adaiaoaq5o5o5q636p7b7t8e939racasb4bcbgbkbrbwbwbxc1c4bzbkb3ama19h948t8m8f867t7m7h72655a4j3y3n3o3x44474e4n4u52555354524z525e5v696n747j7x8c8r969j9r9x9u9o9m9m9m9m9n9r9za2a6ab6c69686h6x7e7w8g939qacatb6bcbfbjbobtbtbtbvbybqbbavah9y9e928r8i89807n7f776o5u4z4a3r3931383f3m3w454d4j4k4j4h4h4f4h4s585n646n747i7t878o90999g9f9892909091939b9j9m9o9x6w6s6p6u747j7z8h929oabasb4babcbgblbobpbnbmbmbcaxama79o988y8o8g877x7m7b6y6f5n4q3z3e2w2n2s30383i3q3y4342403y3y3z424c4s585o666p767i7y8b8n8x93928u8q8k8g8i8n8w979b9e9l7m7l7h7f7i7r848m949la7apb2b8b9bdbfbhbjbdb6b1araea39l978y8p8f89857w7m776o685i4h3i2y2h28292j2t3035393b3b3936373b3h3t464k4z5h606k737m7x868f8h8d8887807r7p7x8c8n8u8w918685847x7t7y8a8p969ka0akb0b7b8bcbebfbeb6auanaba19n968w8q8g8885827t7j736l63594b3c2q2b201y262f2j2m2o2n2p2n2k2p2u323f3q414h505j616k737i7s7z807t7q7o7j79747f7u848c8f8j8r8p8m8e898a8f8s969i9wacavb3b6babebbb6ayamaca09q998u8m8g8a82817z7q7d6s695l4s443c2l251t1o1s1v1y202021242325282g2o2y3a3k3x4h525m626f6t777h7k7f79736w6p6o70797i7q7v819b9a948z8v8r8p8u959i9ta6amaxb0b3b6b4axapac9y9k998y8m8f8a817t7q7o7g6z685g4z4d3t312c1y1m1f1g1i1i1i1h1h1j1n1s1t1z252f2u363h3z4l575o5y696n6w70706u6n6e696b6j6q6y777d7i9q9s9n9i9h9d9591979g9pa2afapauaxazawaoaa9y9i938w8n8e88817r7g7a786z6h5l4z4n403e2j201r1g1715161917131112181e1g1l1r1z2f2t373l454o525e5r636b6g6i6e66605w5x61686h6q6x719xa09x9u9v9u9k9b9c9e9na0adamaravavaqaf9y9j928o8k8d857y7r7h736x6r6h5z5a4r4d3m2t211m1i19100w0v0w0w0u0r0t0x1315191g1o212g2x3b3s434e4u5a5o5w60625z5s5m5k5j5m5u636a6j6qa2a7a6a5a6a49v9m9j9i9ra4afaoatawataka69p988s8f8b857v7o7g756v6m685x5j4z4e3y34281l1c17100r0n0m0l0n0o0m0n0q0t0v0y161g1o222k323g3p3y4c4s575g5l5n5m5f5958595c5h5o5w676lacagakaiagaba6a09v9s9zacalatazb0asaf9z9h918m8c867v7j7b716q6h655o5c4x493t3c2i1s1b130x0o0j0h0h0f0i0l0j0i0k0k0m0p0y151d1n252n323c3j3t474n4x525758524x4x4y5155595k5z6falapauatapamajaea9a4a8ahaqaxb1b3awah9y9d8v8h867x7j756t6f635t5i534r493n372s211g130s0j0f0e0g0g0e0f0i0h0g0h0i0g0l0q0w141d1n222j2x353g3s454f4m4s4u4p4k4k4k4p4s4z5c5s6capataxaxauaqapapalahaiaoavazb3b3axaja19e8v8d7w7k776r6e5y5i524r4h483t372q2b1o140t0l0c0b0c0f0g0e0f0j0l0i0k0k0i0k0l0q0w131b1n232i2s333h3v42464d4e474545454a4i4q575p68aqavayayawatasasaraqarawazb2b5b3avah9y9d8u897p786t6h635k524i433v3m3c2s281u1a0q0i0g0b080a0e0h0g0h0r0w0t0s0r0p0m0l0n0r0w121b1o242h2t383k3p3r3x3y3s3q3p3s3z494m535i62aoawb0azawatarasatavawazb1b4b7b4arab9q9a8r867o746l695t574o453n3b312r2a1q1d0u0g0c0d0b08090d0j0l0p1019171718150x0o0n0q0r0u111b1r282k2w34393g3k3l3h3f3e3i3r454l525f5xalatayawataqarasatavawayb1b4b6b2aqa69m978l817l736k655n4w4c3v3b2w2k281s1c0z0m0b0a0a0a08090g0m0s11191g1n1s1t1r1h100u0t0r0q0u121e1t272j2o2v3437383534353b3n444j505e5uafakarasaparasasasatavaxazb2b2avaoa89n948i7z7j746l655m4s443n352n271w1g0z0r0h09080a0a0b0g0m0u141e1k1u262d2e2b211l1c130x0s0p0s0z1a1o21282h2r2u2t2r2s2x363l424h4u5b5ra9adaiaiajaqauatasasatauaxaxawaraka79l908f7u7e706l635g4o403h2z2c1u1l140m0f0a06070a0d0j0r0z191j1t222e2q2x2x2u2n2c1y1k170y0r0p0r0z191k1t222c2f2g2g2j2s333j404c4o535ma3a5a7a7aaajaqataraqarasarararanaea09e8t897p796u6f5v564h3v3a2q231l1b0s0a050505090e0i0s111c1q202a2m2v353e3h3d362y2k241n19100t0r0v12191h1q1x2223262b2o333j3x474j4y5g9x9z9za0a4acakaoaoanapanajalanaha59o948n827l736m675k4w483l302f1t1c110j030102050a0h0p0x191m212g2u353d3m3v413z3s3h332k211o1e120v0v0w0z161c1l1r1u1x242m333j3v464h4v5b9s9u9v9wa2a8aeahahakaiaeabadagaa9v9a8v8i7w7h706g5z5e4n3w392p261l140p0b020305060b0k0u151h1v2b2t3a3n3x444e4k4n4e3z3l322j251t1f140y0v0v0y131c1i1l1p212m353h3v464i4t57";
+const G = 81, CELL = 25, Z0 = 513.5, HALF = 1000;
+const dem = new Float32Array(G * G); for (let i = 0; i < G * G; i++) dem[i] = parseInt(DEM.substr(i * 2, 2), 36) / 2 + 330 - Z0;
+const dv = (c, r) => dem[Math.min(G - 1, Math.max(0, r)) * G + Math.min(G - 1, Math.max(0, c))];
+const cr = (a, b, c, d, t) => b + .5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - d + t * (3 * (b - c) + d - a)));
+function H(x, n) {
+  const fc = Math.min(G - 1, Math.max(0, (x + HALF) / CELL)), fr = Math.min(G - 1, Math.max(0, (HALF - n) / CELL)), c = Math.floor(fc), r = Math.floor(fr), tx = fc - c, ty = fr - r;
+  const row = k => cr(dv(c - 1, r + k), dv(c, r + k), dv(c + 1, r + k), dv(c + 2, r + k), tx);
+  return cr(row(-1), row(0), row(1), row(2), ty) + (fbm(x / 14, n / 14) - .5) * 1.0 * sstep(40, 140, Math.hypot(x - 10, n - 5));
+}
+const P = (x, n, dy = 0) => new THREE.Vector3(x, H(x, n) + dy, -n);
+const lam = (c, o = {}) => new THREE.MeshLambertMaterial({ color: c, ...o });
+function put(obj, x, n, rot = 0, dy = 0) { obj.position.copy(P(x, n, dy)); obj.rotation.y = rot; scene.add(obj); return obj; }
+function box(w, h, d, c, sh = true) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lam(c)); m.geometry.translate(0, h / 2, 0); m.castShadow = sh; m.receiveShadow = true; return m; }
+
+/* ---------- terrain ---------- */
+const contourU = { value: 1 };
+const road1 = [[-165, 10], [-110, 4], [-50, 3], [10, 0], [55, 3]];
+const road2 = [[55, 3], [88, 28], [108, 85], [118, 140], [125, 168]];
+const paved = [[-995, 310], [-800, 370], [-600, 325], [-500, 275], [-400, 250], [-200, 250], [-100, 225], [0, 200], [100, 175], [200, 150], [300, 150], [400, 175], [500, 200], [650, 270], [800, 250], [900, 228], [995, 232]];
+function distPoly(x, n, pts) { let best = 1e9; for (let i = 0; i < pts.length - 1; i++) { const [ax, an] = pts[i], [bx, bn] = pts[i + 1], vx = bx - ax, vn = bn - an;
+  const t = Math.max(0, Math.min(1, ((x - ax) * vx + (n - an) * vn) / (vx * vx + vn * vn))); best = Math.min(best, Math.hypot(x - ax - vx * t, n - an - vn * t)); } return best; }
+const olive = (x, n) => (n > 28 && n < 150 && x > -330 && x < 170 && !(x > -80 && x < 70 && n < 52)) || (n > -10 && n < 60 && x < -70 && x > -150) || (n < -45 && n > -150 && x > -120 && x < 110);
+{
+  const S = 250, geo = new THREE.PlaneGeometry(1, 1, S, S), pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+  const c = new THREE.Color(), tan = new THREE.Color(0x9a8a62), green = new THREE.Color(0x5f6b3c), red = new THREE.Color(0x8a5a3c), rock = new THREE.Color(0xb9b3a4), grav = new THREE.Color(0xb7a98a), dark = new THREE.Color(0x4a5433);
+  for (let i = 0; i < pos.count; i++) {
+    const u = pos.getX(i) * 2, v = pos.getY(i) * 2;
+    const x = u * HALF, n = v * HALF, y = H(x, n);
+    pos.setXYZ(i, x, y, -n);
+    const f = fbm(x / 60 + 9, n / 60 + 3), f2 = fbm(x / 9, n / 9);
+    c.copy(tan).lerp(green, sstep(.35, .7, f)).lerp(rock, sstep(.72, .9, f2) * .5);
+    if (olive(x, n)) c.lerp(red, .65);
+    if (y < -60) c.lerp(dark, sstep(-60, -160, y) * .5);
+    const yard = Math.hypot((x - 20) / 1.6, n + 2);
+    if (yard < 32) c.lerp(grav, sstep(32, 20, yard));
+    c.multiplyScalar(.88 + f2 * .24);
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.computeVertexNormals();
+  const tmat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  tmat.onBeforeCompile = sh => { sh.uniforms.uContour = contourU;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vH;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvH = position.y;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vH;\nuniform float uContour;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\nfloat cc = (vH + 513.5) / 10.0; float cl = 1.0 - min(abs(fract(cc - 0.5) - 0.5) / (fwidth(cc) * 1.4), 1.0); float c5 = (vH + 513.5) / 50.0; float cl5 = 1.0 - min(abs(fract(c5 - 0.5) - 0.5) / (fwidth(c5) * 1.8), 1.0); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.11, 0.07), max(cl * 0.55, cl5 * 0.85) * uContour);'); };
+  const t = new THREE.Mesh(geo, tmat); t.receiveShadow = true; scene.add(t);
+  // cut sides, so the square reads as a block of ground
+  const wv = [], wi = [], BASE = -235;
+  for (const [ax, an, bx, bn] of [[-HALF, -HALF, HALF, -HALF], [HALF, -HALF, HALF, HALF], [HALF, HALF, -HALF, HALF], [-HALF, HALF, -HALF, -HALF]]) { const o = wv.length / 3;
+    for (let k = 0; k <= 100; k++) { const x = ax + (bx - ax) * k / 100, n = an + (bn - an) * k / 100; wv.push(x, H(x, n), -n, x, BASE, -n); if (k < 100) { const a = o + k * 2; wi.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } } }
+  const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.Float32BufferAttribute(wv, 3)); wg.setIndex(wi); wg.computeVertexNormals();
+  scene.add(new THREE.Mesh(wg, new THREE.MeshLambertMaterial({ color: 0x6f5c47, side: THREE.DoubleSide })));
+  const fl = new THREE.Mesh(new THREE.PlaneGeometry(2 * HALF, 2 * HALF), new THREE.MeshBasicMaterial({ color: 0x4f4234 })); fl.rotation.x = Math.PI / 2; fl.position.y = BASE; scene.add(fl);
+}
+function ribbon(pts, w, color, lift) {
+  const curve = new THREE.CatmullRomCurve3(pts.map(([x, n]) => new THREE.Vector3(x, 0, n))), N = Math.ceil(curve.getLength() / 3), v = [], idx = [];
+  for (let i = 0; i <= N; i++) { const p = curve.getPoint(i / N), t = curve.getTangent(i / N), nx = -t.z, nn = t.x;
+    for (const s of [-1, 1]) { const x = p.x + nx * s * w / 2, n = p.z + nn * s * w / 2; v.push(x, Math.max(H(x, n), H(p.x, p.z)) + lift, -n); }
+    if (i < N) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, lam(color, { side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })); m.receiveShadow = true; scene.add(m);
+}
+ribbon(road1, 5.5, 0xbfb08e, .25); ribbon(road2, 4.5, 0xbfb08e, .25); ribbon(paved, 8, 0x55595c, .4);
+ribbon([[-165, 10], [-198, 20], [-244, 25]], 2.2, 0x7d5a40, .2);
+
+/* ---------- sky, sun, light ---------- */
+{
+  const geo = new THREE.SphereGeometry(5000, 32, 16), pos = geo.attributes.position, col = [], top = new THREE.Color(0x3f74c9), mid = new THREE.Color(0x8fb4e6), low = new THREE.Color(HAZE), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) { const t = Math.max(0, pos.getY(i) / 5000); c.copy(low).lerp(mid, sstep(0, .18, t)).lerp(top, sstep(.15, .8, t)); col.push(c.r, c.g, c.b); }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false })));
+}
+const az = 112 * Math.PI / 180, el = 17 * Math.PI / 180;
+const sunDir = new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az) * -1 * -1).normalize(); // east and a little south
+{
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128; const x = cv.getContext('2d'), gr = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, 'rgba(255,255,245,1)'); gr.addColorStop(.18, 'rgba(255,240,200,.9)'); gr.addColorStop(.5, 'rgba(255,220,150,.25)'); gr.addColorStop(1, 'rgba(255,220,150,0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 128, 128);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), fog: false, depthWrite: false, transparent: true }));
+  s.scale.setScalar(1300); s.position.copy(sunDir).multiplyScalar(4500); scene.add(s);
+}
+scene.add(new THREE.HemisphereLight(0xcfe0ff, 0x8a7a55, 1.25));
+const sun = new THREE.DirectionalLight(0xffe2b0, 2.3); sun.position.copy(sunDir).multiplyScalar(400); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -170, right: 170, top: 170, bottom: -170, near: 50, far: 900 }); sun.shadow.bias = -0.0015;
+scene.add(sun, sun.target);
+
+/* ---------- farm structures ---------- */
+// arched sheep barn, long axis east–west, open canopy at the west end
+{
+  const grp = new THREE.Group(), L = 30, W = 11, R = 5.5;
+  const walls = box(L, 2.6, W, 0xf1f0ea); walls.position.x = 4; grp.add(walls);
+  const roof = new THREE.Mesh(new THREE.CylinderGeometry(R, R, L + 8, 24, 1, true, 0, Math.PI), lam(0xe9e6dc, { side: THREE.DoubleSide }));
+  roof.rotation.z = Math.PI / 2; roof.position.set(0, 2.6, 0); roof.castShadow = true; grp.add(roof);
+  const er = new THREE.Mesh(new THREE.CircleGeometry(R, 24, 0, Math.PI), lam(0xf1f0ea, { side: THREE.DoubleSide })); er.rotation.y = Math.PI / 2; er.position.set(19, 2.6, 0); grp.add(er);
+  for (const z of [-R, R]) for (const x of [-18.5, -14]) { const p = box(.15, 2.6, .15, 0x8d9296); p.position.set(x, 0, z); grp.add(p); }
+  put(grp, -12, 30, 0.12);
+}
+// pens: fence lines around the barn
+{
+  const v = [], rect = (x0, n0, x1, n1) => { const c = [[x0, n0], [x1, n0], [x1, n1], [x0, n1], [x0, n0]];
+    for (let i = 0; i < 4; i++) for (let k = 0; k < 6; k++) { const a = k / 6, b = (k + 1) / 6, ax = c[i][0] + (c[i + 1][0] - c[i][0]) * a, an = c[i][1] + (c[i + 1][1] - c[i][1]) * a, bx = c[i][0] + (c[i + 1][0] - c[i][0]) * b, bn = c[i][1] + (c[i + 1][1] - c[i][1]) * b;
+      for (const y of [.6, 1.3]) { v.push(...P(ax, an, y).toArray(), ...P(bx, bn, y).toArray()); } v.push(...P(ax, an, 0).toArray(), ...P(ax, an, 1.4).toArray()); } };
+  rect(-48, 20, -30, 44); rect(-30, 38, 8, 52); rect(-52, 46, -34, 58);
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); scene.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x6f7376 })));
+}
+// feed silo with flag
+{
+  const grp = new THREE.Group(), steel = lam(0xa9adb0);
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 3.6, 20), steel); body.position.y = 6.6;
+  const hop = new THREE.Mesh(new THREE.CylinderGeometry(1.7, .25, 2.6, 20), steel); hop.position.y = 3.5;
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(1.75, .9, 20), steel); cap.position.y = 8.85;
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(1.72, 1.72, .8, 20, 1, true), lam(0x1f7a55)); band.position.y = 7.6;
+  grp.add(body, hop, cap, band);
+  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4, leg = box(.14, 5, .14, 0x8d9296); leg.position.set(Math.cos(a) * 1.75, 0, Math.sin(a) * 1.75); grp.add(leg); }
+  const pole = box(.06, 3, .06, 0x333333); pole.position.set(0, 9.2, 0); grp.add(pole);
+  const fc = document.createElement('canvas'); fc.width = 220; fc.height = 160; const x = fc.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, 220, 160); x.fillStyle = '#0038b8'; x.fillRect(0, 18, 220, 24); x.fillRect(0, 118, 220, 24);
+  x.strokeStyle = '#0038b8'; x.lineWidth = 6; for (const s of [1, -1]) { x.beginPath(); x.moveTo(110, 80 - 32 * s); x.lineTo(110 + 28, 80 + 16 * s); x.lineTo(110 - 28, 80 + 16 * s); x.closePath(); x.stroke(); }
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.6), new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(fc), side: THREE.DoubleSide })); flag.position.set(1.1, 11.4, 0); grp.add(flag);
+  grp.traverse(o => o.isMesh && (o.castShadow = true)); put(grp, 4, 17);
+}
+// containers, hut, caravans
+function container(c, text) { const m = box(12.2, 2.6, 2.44, c);
+  if (text) { const cv = document.createElement('canvas'); cv.width = 512; cv.height = 110; const x = cv.getContext('2d'); x.fillStyle = '#2f8f6d'; x.fillRect(0, 0, 512, 110); x.fillStyle = '#e9efe9'; x.font = 'bold 54px sans-serif'; x.textAlign = 'center'; x.fillText(text, 256, 74);
+    const pl = new THREE.Mesh(new THREE.PlaneGeometry(12.2, 2.6), new THREE.MeshLambertMaterial({ map: new THREE.CanvasTexture(cv) })); pl.position.set(0, 1.3, 1.23); m.add(pl); const p2 = pl.clone(); p2.rotation.y = Math.PI; p2.position.z = -1.23; m.add(p2); } return m; }
+put(container(0x2f8f6d, 'CHINA SHIPPING'), 58, 16, 0.05);
+put(container(0x8c3f2c), -62, 12, -0.1);
+function caravan(l = 10, c = 0xf3f2ee) { const grp = new THREE.Group(), b = box(l, 2.7, 3.6, c), r = box(l + .4, .25, 4, 0xd9d6cc); r.position.y = 2.7; grp.add(b, r);
+  for (const x of [-l / 4, l / 4]) { const w = box(1.1, .9, .06, 0x3d4a57, false); w.position.set(x, 1.3, 1.83); grp.add(w); } return grp; }
+put(caravan(11), 34, -14, 0.08);                               // white building with the mural, south of the lane
+{ const m = box(5, 2.4, .08, 0x3b5f8c, false); const c = put(new THREE.Group(), 34, -14, 0.08); m.position.set(-2, .2, 1.9); c.add(m); }
+put(caravan(8), 46, -22, 0.08); put(caravan(11), 36, -76, 0.12); put(caravan(11), 54, -72, 0.12); put(box(5, 2.2, 2.4, 0x3a3f45), 20, -78, 0.12); put(caravan(9), 62, -42, -0.2);
+put(box(4, 2.6, 3, 0xe6c98f), 12, 9, 0);
+// long red-roofed shed below the hilltop, south of the lane's west end
+{ const grp = new THREE.Group(), b = box(15, 2.5, 4.2, 0xf1eee6), r = box(15.6, .35, 4.8, 0x9c3b2e); r.position.y = 2.5; grp.add(b, r); put(grp, -95, -22, 0.1); }
+// cream gazebo tent beside the white building in the yard
+{ const grp = new THREE.Group(), b = box(4, 2.1, 4, 0xe9dfb8), r = new THREE.Mesh(new THREE.ConeGeometry(3.1, 1.4, 4), lam(0xe9dfb8)); r.rotation.y = Math.PI / 4; r.position.y = 2.8; r.castShadow = true; grp.add(b, r); put(grp, 25, -8, 0.08); }
+// stacked materials east of the yard buildings
+[[58, -12, 0x8a6a48], [63, -15, 0x6f7376], [60, -19, 0xa8562f]].forEach(([x, n, c]) => put(box(3.5, 1, 2, c), x, n, rnd() * 3));                       // cream hut by the parking
+put(box(.6, .85, .6, 0xf7f7f7), 14.6, 8, 0);                   // washing machine outside it
+put(box(4.5, 2.6, 3.2, 0xf3f2ee), -58, 44, 0.3);               // small white shed north-west of the barn
+{ const pg = new THREE.Group(), roof = new THREE.Mesh(new THREE.PlaneGeometry(9, 5), lam(0x4a3d33, { side: THREE.DoubleSide })); roof.rotation.x = -Math.PI / 2; roof.position.y = 2.7; roof.castShadow = true; pg.add(roof);
+  for (const [x, z] of [[-4.3, -2.3], [4.3, -2.3], [-4.3, 2.3], [4.3, 2.3]]) { const p = box(.15, 2.7, .15, 0x5a4636); p.position.set(x, 0, z); pg.add(p); } put(pg, 50, -8, 0.08); }
+// portable double cubicle
+{ const grp = new THREE.Group(), b = box(2.3, 2.3, 1.3, 0xe8eaee), t = box(2.4, .12, 1.4, 0x2d4f9e); t.position.y = 2.3; const s = box(.08, 2.3, 1.32, 0x2d4f9e); grp.add(b, t, s); put(grp, -36, 16, 0.4); }
+// cars
+function car(c) { const grp = new THREE.Group(), a = box(4.3, .75, 1.8, c), b = box(2.4, .65, 1.6, c); a.position.y = .35; b.position.set(-.2, 1.1, 0); const gl = box(2.42, .45, 1.62, 0x2a3640, false); gl.position.set(-.2, 1.18, 0); grp.add(a, b, gl);
+  for (const x of [-1.35, 1.35]) for (const z of [-.9, .9]) { const w = new THREE.Mesh(new THREE.CylinderGeometry(.36, .36, .22, 12), lam(0x1c1c1c)); w.rotation.x = Math.PI / 2; w.position.set(x, .36, z); grp.add(w); } return grp; }
+[[22, 5, 1.2, 0xf4f4f4], [26, 6, 1.25, 0xf4f4f4], [30, 7, 1.2, 0xcfd3d6], [33, -4, -1.3, 0xf4f4f4], [38, -3, -1.2, 0xf4f4f4], [-2, 10, 0.2, 0xf4f4f4], [44, 8, 1.3, 0xb9bcc0]].forEach(([x, n, r, c]) => put(car(c), x, n, r));
+// tractor by the barn
+{ const grp = new THREE.Group(), b = box(2.6, 1, 1.1, 0x2d4f9e); b.position.y = .8; const cab = box(1.1, 1.3, 1.1, 0x23324a); cab.position.set(-.8, 1.7, 0); grp.add(b, cab);
+  for (const [x, r] of [[-.8, .75], [1, .45]]) for (const z of [-.75, .75]) { const w = new THREE.Mesh(new THREE.CylinderGeometry(r, r, .35, 14), lam(0x1c1c1c)); w.rotation.x = Math.PI / 2; w.position.set(x, r, z); grp.add(w); } put(grp, 14, 26, 0.6); }
+// playground and solar array
+function tower() { const grp = new THREE.Group(); for (const x of [-.8, .8]) for (const z of [-.8, .8]) { const p = box(.12, 3.3, .12, 0x2748a8); p.position.set(x, 0, z); grp.add(p); }
+  const pl = box(1.8, .1, 1.8, 0x9aa0a6); pl.position.y = 1.3; const rf = new THREE.Mesh(new THREE.ConeGeometry(1.5, .7, 4), lam(0xb53a3a)); rf.rotation.y = Math.PI / 4; rf.position.y = 3.65; rf.castShadow = true; grp.add(pl, rf); return grp; }
+put(tower(), 66, -24); put(tower(), 71, -25);
+{ const tube = new THREE.Mesh(new THREE.CylinderGeometry(.45, .45, 2.4, 14, 1, true), lam(0x2748a8, { side: THREE.DoubleSide })); tube.rotation.z = Math.PI / 2; put(tube, 68.5, -25.5, 0.3, .45);
+  const sl = box(.7, .08, 2.4, 0x2748a8); sl.rotation.x = .5; put(sl, 73, -25.5, 0, .2); }
+{ const pv = new THREE.Mesh(new THREE.BoxGeometry(9, .1, 3.2), lam(0x1d2c44)); pv.rotation.x = -.45; pv.castShadow = true; put(pv, 74, -34, 0, 1.3); }
+// bench at the western lookout
+{ const grp = new THREE.Group(), w = 0x8a5a2e, seat = box(2.2, .1, .6, w); seat.position.y = .45; const back = box(2.2, .6, .08, w); back.position.set(0, .55, .28); grp.add(seat, back);
+  for (const x of [-1, 1]) { const l = box(.1, .45, .6, w); l.position.x = x; grp.add(l); } put(grp, -246, 25, Math.PI / 2 + .1); }
+
+/* ---------- surroundings ---------- */
+// hilltop post on the ridge north of the road (crest at 543 m)
+[[-40, 452, 9, 0], [-28, 446, 7, .3], [-55, 444, 6, -.2]].forEach(([x, n, l, r]) => put(box(l, 2.8, 4, 0xf0efe9), x, n, r));
+[[-20, 456, 16], [-48, 460, 22], [-66, 448, 12]].forEach(([x, n, h]) => put(box(.25, h, .25, 0x7c8084), x, n));
+{ const t = box(2.5, 6, 2.5, 0x8d9296); put(t, -8, 448); put(box(3.2, 1.6, 3.2, 0x9a927d), -8, 448, 0, 6); }
+// village on the east hill (summit 563 m) with minaret
+for (let i = 0; i < 150; i++) { const a = rnd() * 6.283, r = Math.sqrt(rnd()) * 240, x = 740 + Math.cos(a) * r, n = 50 + Math.sin(a) * r * 1.1, w = 9 + rnd() * 9;
+  if (H(x, n) > 22 && Math.abs(x) < 980 && distPoly(x, n, paved) > 14) put(box(w, 5 + rnd() * 7, 8 + rnd() * 8, rnd() < .5 ? 0xe4dccb : 0xd3cab8, false), x, n, rnd() * 3); }
+put(box(14, 22, 14, 0xdcd4c2, false), 735, 65);
+{ const m = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2, 38, 10), lam(0xe9e2d2)); m.geometry.translate(0, 19, 0); put(m, 790, 25); const tip = new THREE.Mesh(new THREE.ConeGeometry(2.2, 7, 10), lam(0x7a8f86)); put(tip, 790, 25, 0, 41); }
+// neighbouring homes to the east and south-east of the farm
+ribbon([[150, -22], [200, -34], [260, -42], [320, -26], [390, -44], [470, -30]], 5, 0xcfc8b8, .3);
+[[178, -20, 12, 3.2, 9, 0xeeeae0], [196, -52, 10, 3, 8, 0xeeeae0], [214, -18, 16, 3.5, 9, 0x4a4f55], [232, -58, 22, 3.2, 8, 0x3f4a44], [250, -22, 11, 5.5, 10, 0xe6e0d2], [268, -60, 12, 3, 8, 0xeeeae0],
+ [286, -12, 10, 3, 8, 0xd8d2c4], [300, -48, 18, 3.4, 9, 0x4a4f55], [322, -8, 12, 5.8, 10, 0xe6e0d2], [340, -62, 10, 3, 8, 0xeeeae0], [362, -26, 11, 3.2, 8, 0xd8d2c4], [205, 6, 9, 2.8, 4, 0xf3f2ee], [240, 10, 9, 2.8, 4, 0xf3f2ee],
+ [150, -62, 10, 2.8, 3.6, 0xf3f2ee], [164, -58, 10, 2.8, 3.6, 0xf3f2ee]].forEach(([x, n, w, h, d, c]) => put(box(w, h, d, c), x, n, (rnd() - .5) * .5));
+// street lights along the paved road
+{ const cv = new THREE.CatmullRomCurve3(paved.map(([x, n]) => new THREE.Vector3(x, 0, n))), K = Math.floor(cv.getLength() / 60);
+  for (let k = 1; k < K; k++) { const p = cv.getPointAt(k / K), t = cv.getTangentAt(k / K), x = p.x - t.z * 6, n = p.z + t.x * 6; if (Math.abs(x) > 600) continue; put(box(.18, 8, .18, 0x8d9296, false), x, n); } }
+
+/* ---------- vegetation and rocks (instanced) ---------- */
+function scatter(geo, mat, items, shadow) { items = items.filter(t => Math.abs(t[0]) < 985 && Math.abs(t[1]) < 985); const im = new THREE.InstancedMesh(geo, mat, items.length), d = new THREE.Object3D();
+  items.forEach((t, i) => { d.position.copy(P(t[0], t[1], t[3] || 0)); d.scale.set(t[2], t[2] * (t[4] || 1), t[2]); d.rotation.y = rnd() * 6; d.updateMatrix(); im.setMatrixAt(i, d.matrix); if (t[5]) im.setColorAt(i, t[5]); });
+  im.castShadow = !!shadow; im.receiveShadow = false; scene.add(im); return im; }
+const clear = (x, n) => !(x > 140 && x < 380 && n > -75 && n < 22) && !(x > -108 && x < -82 && n > -30 && n < -14) && !(x > 10 && x < 66 && n > -84 && n < -64) && Math.hypot(x + 215, n - 23) > 45 && distPoly(x, n, road1) > 6 && distPoly(x, n, road2) > 5 && distPoly(x, n, paved) > 8 && !(x > -70 && x < 110 && n > -50 && n < 58);
+{ // olives on terraces
+  const it = [], c1 = new THREE.Color(0x6f7d55), c2 = new THREE.Color(0x58683f);
+  for (let x = -330; x < 180; x += 9) for (let n = -150; n < 152; n += 9) { const px = x + (rnd() - .5) * 5, pn = n + (rnd() - .5) * 4; if (olive(px, pn) && clear(px, pn) && rnd() > .12) it.push([px, pn, 1.6 + rnd() * .9, 1.2, .8, c1.clone().lerp(c2, rnd())]); }
+  for (let i = 0; i < 700; i++) { const x = -980 + rnd() * 1960, n = -980 + rnd() * 1960; if (!olive(x, n) && clear(x, n) && fbm(x / 160, n / 160) > .52 && H(x, n) > -150 && H(x, n) < 20) it.push([x, n, 1.8 + rnd() * 1.2, 1.3, .8, c1.clone().lerp(c2, rnd())]); }
+  scatter(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshLambertMaterial({ flatShading: true }), it, true);
+}
+{ // pines on the viewpoint hill's north side, the post hill and scattered slopes
+  const it = [], c1 = new THREE.Color(0x3f6a35), c2 = new THREE.Color(0x56873b);
+  const add = (cx, cn, sx, sn, k) => { for (let i = 0; i < k; i++) { const x = cx + (rnd() - .5) * sx, n = cn + (rnd() - .5) * sn; if (clear(x, n) && !olive(x, n) && Math.hypot(x + 200, n - 22) > 50 && !(x < -200 && Math.abs(n - 22) < 70)) it.push([x, n, 1.3 + rnd() * 1.1, 0, 2 + rnd() * .8, c1.clone().lerp(c2, rnd())]); } };
+  add(-300, 60, 220, 150, 170); add(-270, -90, 200, 120, 90); add(-120, 430, 260, 160, 150); add(-500, 520, 400, 300, 130); add(120, -220, 300, 160, 90); add(-560, -430, 380, 300, 220); add(-700, 80, 400, 300, 110); add(500, -600, 500, 400, 120);
+  const geo = new THREE.ConeGeometry(1, 2, 7); geo.translate(0, 1, 0); scatter(geo, new THREE.MeshLambertMaterial({ flatShading: true }), it, true);
+}
+{ // cypress by the neighbouring homes
+  const it = []; for (let i = 0; i < 34; i++) { const x = 165 + rnd() * 200, n = -70 + rnd() * 85; it.push([x, n, 1.1, 0, 5 + rnd() * 2, new THREE.Color(rnd() < .15 ? 0xb9a437 : 0x2f4a2c)]); }
+  const geo = new THREE.ConeGeometry(1, 2, 8); geo.translate(0, 1, 0); scatter(geo, new THREE.MeshLambertMaterial(), it, true);
+}
+{ // dry scrub and limestone
+  const sc = [], rk = [], a = new THREE.Color(0xa39466), b = new THREE.Color(0x6e7445), r1 = new THREE.Color(0xcfc9ba), r2 = new THREE.Color(0xa9a08c);
+  for (let i = 0; i < 5200; i++) { const rr = Math.pow(rnd(), 1.6) * 650, t = rnd() * 6.283, x = -60 + Math.cos(t) * rr, n = 20 + Math.sin(t) * rr; if (!clear(x, n) && !(Math.hypot(x - 20, n) > 40)) continue; if (distPoly(x, n, road1) < 5.5 || Math.hypot(x + 200, n - 22) < 6 || distPoly(x, n, paved) < 6 || (x > -10 && x < 62 && n > -20 && n < 14)) continue;
+    if (rnd() < .78) sc.push([x, n, .35 + rnd() * .6, .1, .7, a.clone().lerp(b, rnd())]); else rk.push([x, n, .2 + rnd() * .55, 0, .6, r1.clone().lerp(r2, rnd())]); }
+  scatter(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshLambertMaterial({ flatShading: true }), sc, false);
+  scatter(new THREE.DodecahedronGeometry(1, 0), new THREE.MeshLambertMaterial({ flatShading: true }), rk, true);
+}
+{ // a few sheep in the pen
+  const it = []; for (let i = 0; i < 9; i++) it.push([-45 + rnd() * 12, 24 + rnd() * 16, .45, .5, .8, new THREE.Color(i % 4 ? 0xeeeadf : 0x2b2b2b)]);
+  scatter(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshLambertMaterial(), it, true);
+}
+
+/* ---------- labels ---------- */
+const labelDefs = [['Hilltop viewpoint · 525 m', -198, 22, 6], ['Bench lookout', -246, 25, 4], ['Sheep barn', -12, 30, 11], ['Feed silo and flag', 4, 17, 15], ['China Shipping container', 58, 16, 6], ['Red container', -62, 12, 6],
+  ['Caravans', 45, -74, 7], ['Red-roofed shed', -95, -22, 6], ['Neighbouring buildings', 260, -35, 16], ['Playground and solar', 69, -26, 7], ['Farm yard · 514 m', 22, 4, 5], ['Olive terraces', -40, 100, 10], ['Paved road · valley 484 m', 0, 200, 12], ['Hilltop post · 543 m', -40, 452, 26], ['Village and minaret · 563 m', 760, 45, 60], ['Hill · 546 m', -520, -440, 14], ['Wadi floor · 335 m', 0, -900, 14]];
+const labelBox = document.getElementById('labels');
+const labels = labelDefs.map(([t, x, n, dy]) => { const el = document.createElement('div'); el.className = 'lbl'; el.textContent = t; labelBox.appendChild(el); return { el, p: P(x, n, dy) }; });
+let showLabels = true; const tmp = new THREE.Vector3();
+function placeLabels(w, h) { for (const l of labels) { tmp.copy(l.p).project(camera); const ok = showLabels && tmp.z < 1 && tmp.z > -1 && Math.abs(tmp.x) < 1.05 && Math.abs(tmp.y) < 1.05 && camera.position.distanceTo(l.p) > 25;
+  l.el.hidden = !ok; if (ok) l.el.style.transform = `translate(-50%,-100%) translate(${((tmp.x + 1) / 2 * w).toFixed(1)}px,${((1 - tmp.y) / 2 * h - 14).toFixed(1)}px)`; } }
+
+/* ---------- camera, views ---------- */
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true; controls.maxPolarAngle = Math.PI / 2 - 0.02; controls.minDistance = 4; controls.maxDistance = 3600; controls.zoomSpeed = .9;
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+controls.autoRotate = !reduce; controls.autoRotateSpeed = .35;
+const views = {
+  overview: [P(-500, -1500, 0).setY(950), P(0, 0, 0).setY(-60)],
+  hilltop: [P(-198, 22, 2.6), P(20, 10, 2)],
+  yard: [P(-46, 2, 1.8), P(40, 6, 2.2)],
+  bench: [P(-234, 25, 3.2), P(-1000, 120, 0).setY(-50)],
+  road: [P(40, 405, 4), P(-40, 30, 2)],
+};
+let tween = null;
+function go(name, instant) { const [p, t] = views[name]; controls.autoRotate = name === 'overview' && !reduce;
+  if (instant || reduce) { camera.position.copy(p); controls.target.copy(t); tween = null; } else tween = { p0: camera.position.clone(), t0: controls.target.clone(), p, t, s: performance.now() };
+  document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', b.dataset.view === name)); }
+document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
+controls.addEventListener('start', () => { controls.autoRotate = false; tween = null; document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', 'false')); });
+const lblbtn = document.getElementById('lblbtn'); lblbtn.addEventListener('click', () => { showLabels = !showLabels; lblbtn.setAttribute('aria-pressed', showLabels); });
+const ctrbtn = document.getElementById('ctrbtn'); ctrbtn.addEventListener('click', () => { contourU.value = contourU.value ? 0 : 1; ctrbtn.setAttribute('aria-pressed', !!contourU.value); });
+document.getElementById('more').addEventListener('click', () => document.getElementById('card').classList.toggle('open'));
+go('overview', true);
+
+const needle = document.getElementById('needle'); let W = 0, Hh = 0;
+function frame() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  if (w !== W || h !== Hh) { W = w; Hh = h; renderer.setSize(w, h, false); camera.aspect = w / h; camera.fov = w < h ? 68 : 55; camera.updateProjectionMatrix(); }
+  if (tween) { const k = Math.min(1, (performance.now() - tween.s) / 1600), e = k * k * (3 - 2 * k); camera.position.lerpVectors(tween.p0, tween.p, e); controls.target.lerpVectors(tween.t0, tween.t, e); if (k >= 1) tween = null; }
+  controls.update();
+  const ground = H(camera.position.x, -camera.position.z) + 1.2; if (camera.position.y < ground) camera.position.y = ground;
+  camera.getWorldDirection(tmp); needle.style.transform = `rotate(${(-Math.atan2(tmp.x, -tmp.z) * 180 / Math.PI).toFixed(1)}deg)`;
+  renderer.render(scene, camera); placeLabels(w, h);
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+
+</body>
+</html>
