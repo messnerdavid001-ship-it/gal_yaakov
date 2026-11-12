@@ -307,8 +307,8 @@ const clear = (x, n) => !(x > 140 && x < 380 && n > -75 && n < 22) && !(x > -108
 }
 
 /* ---------- labels ---------- */
-const labelDefs = [['Hilltop viewpoint · 525 m', -198, 22, 6], ['Bench lookout', -246, 25, 4], ['Sheep barn', -12, 30, 11], ['Feed silo and flag', 4, 17, 15], ['China Shipping container', 58, 16, 6], ['Red container', -62, 12, 6],
-  ['Caravans', 45, -74, 7], ['Red-roofed shed', -95, -22, 6], ['Neighbouring buildings', 260, -35, 16], ['Playground and solar', 69, -26, 7], ['Farm yard · 514 m', 22, 4, 5], ['Olive terraces', -40, 100, 10], ['Paved road · valley 484 m', 0, 200, 12], ['Hilltop post · 543 m', -40, 452, 26], ['Village and minaret · 563 m', 760, 45, 60], ['Hill · 546 m', -520, -440, 14], ['Wadi floor · 335 m', 0, -900, 14]];
+const labelDefs = [['Sheep barn', -12, 30, 11], ['Feed silo and flag', 4, 17, 15], ['China Shipping container', 58, 16, 6], ['Red container', -62, 12, 6],
+  ['Caravans', 45, -74, 7], ['Red-roofed shed', -95, -22, 6], ['Neighbouring buildings', 260, -35, 16], ['Playground and solar', 69, -26, 7], ['Olive terraces', -40, 100, 10], ['Paved road · valley 484 m', 0, 200, 12], ['Hilltop post · 543 m', -40, 452, 26], ['Village and minaret · 563 m', 760, 45, 60], ['Hill · 546 m', -520, -440, 14], ['Wadi floor · 335 m', 0, -900, 14]];
 const labelBox = document.getElementById('labels');
 const labels = labelDefs.map(([t, x, n, dy]) => { const el = document.createElement('div'); el.className = 'lbl'; el.textContent = t; labelBox.appendChild(el); return { el, p: P(x, n, dy) }; });
 let showLabels = true; const tmp = new THREE.Vector3();
