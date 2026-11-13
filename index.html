@@ -37,6 +37,7 @@ canvas{display:block;width:100%;height:100%}
 .lbl{position:absolute;left:0;top:0;font:500 .7rem var(--body);color:var(--text);background:var(--label);padding:3px 7px;border-radius:5px;white-space:nowrap;
   pointer-events:none;will-change:transform;border:1px solid var(--panel-line)}
 .lbl::after{content:"";position:absolute;left:50%;top:100%;width:1px;height:14px;background:var(--text);opacity:.6}
+.attr{font-size:.62rem;color:var(--muted);margin-top:6px}
 #err{position:absolute;inset:auto 16px 50% 16px;text-align:center;font-size:.9rem;color:var(--ink)}
 @media (max-width:520px){.card p{display:none}.card.open p{display:block}.chip{padding:7px 10px;font-size:.74rem}}
 @media (min-width:521px){.card button.link{display:none}}
@@ -50,7 +51,8 @@ canvas{display:block;width:100%;height:100%}
   <div class="card" id="card">
     <h1>Hilltop Farm 3D</h1>
     <div class="coords">32.0048° N · 35.1005° E · yard 514 m</div>
-    <p>The ground is real elevation data for the 2 km × 2 km square around the farm (satellite radar survey, about 30 m detail), with contour lines every 10 m. Buildings, roads and trees are placed from your photos and videos, so their positions are approximate. Drag to orbit, pinch or scroll to zoom.</p>
+    <p>The ground is real elevation data for the 2 km × 2 km square around the farm, with contour lines every 10 m and numbers on the 400 m and 500 m lines. Roads and the neighbouring houses follow OpenStreetMap and satellite imagery. The farm's own structures are placed from your photos, because the imagery is older than the farm. Drag to orbit, pinch or scroll to zoom.</p>
+    <div class="attr" id="attr" hidden>Imagery © Esri, Maxar, Earthstar Geographics</div>
     <button class="link" id="more" type="button">About this model</button>
   </div>
   <div id="compass" aria-hidden="true"><span>N</span><div id="needle"></div></div>
@@ -58,6 +60,7 @@ canvas{display:block;width:100%;height:100%}
     <button class="chip" type="button" data-view="overview">Overview</button>
     <button class="chip" type="button" id="lblbtn" aria-pressed="true">Labels</button>
     <button class="chip" type="button" id="ctrbtn" aria-pressed="true">Contours</button>
+    <button class="chip" type="button" id="satbtn" aria-pressed="false" hidden>Satellite</button>
   </div>
   <div id="err" hidden>The 3D view could not start in this browser.</div>
 </div>
@@ -107,13 +110,33 @@ function put(obj, x, n, rot = 0, dy = 0) { obj.position.copy(P(x, n, dy)); obj.r
 function box(w, h, d, c, sh = true) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lam(c)); m.geometry.translate(0, h / 2, 0); m.castShadow = sh; m.receiveShadow = true; return m; }
 
 /* ---------- terrain ---------- */
-const contourU = { value: 1 };
-const road1 = [[-165, 10], [-110, 4], [-50, 3], [10, 0], [55, 3]];
-const road2 = [[55, 3], [88, 28], [108, 85], [118, 140], [125, 168]];
-const paved = [[-995, 310], [-800, 370], [-600, 325], [-500, 275], [-400, 250], [-200, 250], [-100, 225], [0, 200], [100, 175], [200, 150], [300, 150], [400, 175], [500, 200], [650, 270], [800, 250], [900, 228], [995, 232]];
+const contourU = { value: 1 }; let terrain, tmat; const veg = [];
+const road1 = [[-177, 8], [-157, 22], [-92, 18], [-50, 5], [10, 0], [55, 3], [107, -24], [154, -51], [176, -55]];   // farm lane (OSM + satellite)
+const r465 = [[-1000, 663], [-909, 667], [-848, 662], [-734, 637], [-545, 700], [-514, 703], [-481, 695], [-220, 605], [-177, 582], [-168, 569], [-167, 539], [-199, 473], [-207, 433], [-193, 399], [-167, 371], [-140, 354], [-17, 308], [9, 307], [80, 325], [109, 321], [194, 252], [228, 243], [361, 249], [540, 328], [570, 325], [673, 284], [788, 288], [884, 265], [1000, 285]];
+const r450 = [[964, -1000], [914, -849], [876, -799], [849, -792], [742, -837], [663, -835], [631, -825], [503, -750], [387, -659], [312, -638], [149, -665], [109, -684], [17, -809], [-3, -861], [14, -890], [52, -915], [67, -915], [171, -869], [238, -858], [268, -859], [351, -887], [388, -912], [458, -1000]];
+const paved = r465;
+const ROADS = [ // [points, width, colour, lift] from OpenStreetMap
+  [r465, 8, 0x55595c, .4], [r450, 8, 0x55595c, .4],
+  [[[818, -392], [745, -447], [692, -448], [599, -367], [472, -318], [348, -239], [287, -227], [254, -209], [202, -143], [177, -64], [179, -35], [212, -3], [240, 11], [366, 15], [421, 55], [507, 172], [582, 245], [615, 306]], 6, 0x6a6d6f, .35],
+  [[[1000, -474], [939, -451], [818, -392]], 6, 0x6a6d6f, .35], [[[818, -392], [843, -380], [1000, -394]], 5, 0x6a6d6f, .35],
+  [[[1000, -83], [984, -82], [944, -72], [932, -62], [892, -9], [814, 162], [733, 251], [729, 285]], 5, 0x6a6d6f, .35],
+  [[[215, -165], [139, -203], [77, -205]], 4.5, 0x7d7f80, .3],
+  [[[120, 315], [173, 388], [164, 420], [130, 433], [93, 434], [41, 388], [-4, 384], [-31, 388], [-105, 431], [-114, 447], [-104, 462], [-77, 471]], 5, 0x6a6d6f, .35],
+  [road1, 5.5, 0xbfb08e, .25],
+  [[[-1000, -257], [-975, -230], [-917, -187], [-851, -153], [-770, -135], [-687, -98], [-631, -59], [-472, -97], [-390, -105], [-357, -125], [-321, -185], [-265, -222], [-234, -230]], 3, 0xa58c68, .2],
+  [[[179, -35], [165, -47], [116, -55], [49, -92], [-61, -85], [-137, -125], [-150, -147], [-184, -151], [-204, -164], [-224, -199], [-258, -297], [-281, -397], [-247, -450], [-263, -560], [-417, -793], [-424, -840], [-468, -961], [-476, -1000]], 3, 0xa58c68, .2],
+  [[[-157, 22], [-215, 62], [-280, 99]], 3, 0xa58c68, .2], [[[960, 274], [978, 245], [1000, 250]], 3, 0xa58c68, .2],
+  [[[822, -388], [805, -369], [769, -364], [779, -321], [745, -304], [744, -262]], 3, 0xa58c68, .2], [[[955, -391], [974, -331]], 3, 0xa58c68, .2],
+  [[[-177, 8], [-198, 22], [-244, 25]], 2.2, 0x7d5a40, .2],
+];
+const nearRoad = (x, n, pad = 2) => ROADS.some(r => distPoly(x, n, r[0]) < r[1] / 2 + pad);
+// houses read off the satellite image: Al-Hossa (south-east of the farm) and the western edge of Deir Nidham
+const HOUSES = [[154, -134], [140, -157], [50, -179], [55, -196], [97, -174], [121, -174], [111, -218], [154, -218], [173, -218], [187, -252], [92, -246], [202, -196], [178, -300, 1], [235, -302], [249, -300], [316, -118], [339, -196], [360, -210], [404, -222, 1], [395, -237],
+  [344, -296], [344, -313], [339, -369], [415, -308], [442, -322], [463, -335, 1], [582, -380], [553, -274], [680, -155], [646, -415, 1],
+  [838, 38], [863, -12], [865, -38], [868, -82], [970, -115], [735, -241], [717, -291], [795, -315], [777, -347], [794, -335], [742, -396], [777, -396], [967, -315], [940, -364, 1], [912, -370], [892, -397], [840, -421], [945, -324]];
 function distPoly(x, n, pts) { let best = 1e9; for (let i = 0; i < pts.length - 1; i++) { const [ax, an] = pts[i], [bx, bn] = pts[i + 1], vx = bx - ax, vn = bn - an;
   const t = Math.max(0, Math.min(1, ((x - ax) * vx + (n - an) * vn) / (vx * vx + vn * vn))); best = Math.min(best, Math.hypot(x - ax - vx * t, n - an - vn * t)); } return best; }
-const olive = (x, n) => (n > 28 && n < 150 && x > -330 && x < 170 && !(x > -80 && x < 70 && n < 52)) || (n > -10 && n < 60 && x < -70 && x > -150) || (n < -45 && n > -150 && x > -120 && x < 110);
+const olive = (x, n) => n > 28 && n < 215 && x > -199 && x < 170 && !(x > -80 && x < 70 && n < 52);
 {
   const S = 250, geo = new THREE.PlaneGeometry(1, 1, S, S), pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
   const c = new THREE.Color(), tan = new THREE.Color(0x9a8a62), green = new THREE.Color(0x5f6b3c), red = new THREE.Color(0x8a5a3c), rock = new THREE.Color(0xb9b3a4), grav = new THREE.Color(0xb7a98a), dark = new THREE.Color(0x4a5433);
@@ -131,12 +154,12 @@ const olive = (x, n) => (n > 28 && n < 150 && x > -330 && x < 170 && !(x > -80 &
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.computeVertexNormals();
-  const tmat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  tmat = new THREE.MeshLambertMaterial({ vertexColors: true });
   tmat.onBeforeCompile = sh => { sh.uniforms.uContour = contourU;
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vH;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvH = position.y;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vH;\nuniform float uContour;')
       .replace('#include <color_fragment>', '#include <color_fragment>\nfloat cc = (vH + 513.5) / 10.0; float cl = 1.0 - min(abs(fract(cc - 0.5) - 0.5) / (fwidth(cc) * 1.4), 1.0); float c5 = (vH + 513.5) / 50.0; float cl5 = 1.0 - min(abs(fract(c5 - 0.5) - 0.5) / (fwidth(c5) * 1.8), 1.0); diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.16, 0.11, 0.07), max(cl * 0.55, cl5 * 0.85) * uContour);'); };
-  const t = new THREE.Mesh(geo, tmat); t.receiveShadow = true; scene.add(t);
+  const t = new THREE.Mesh(geo, tmat); t.receiveShadow = true; scene.add(t); terrain = t;
   // cut sides, so the square reads as a block of ground
   const wv = [], wi = [], BASE = -235;
   for (const [ax, an, bx, bn] of [[-HALF, -HALF, HALF, -HALF], [HALF, -HALF, HALF, HALF], [HALF, HALF, -HALF, HALF], [-HALF, HALF, -HALF, -HALF]]) { const o = wv.length / 3;
@@ -153,8 +176,7 @@ function ribbon(pts, w, color, lift) {
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); geo.setIndex(idx); geo.computeVertexNormals();
   const m = new THREE.Mesh(geo, lam(color, { side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })); m.receiveShadow = true; scene.add(m);
 }
-ribbon(road1, 5.5, 0xbfb08e, .25); ribbon(road2, 4.5, 0xbfb08e, .25); ribbon(paved, 8, 0x55595c, .4);
-ribbon([[-165, 10], [-198, 20], [-244, 25]], 2.2, 0x7d5a40, .2);
+ROADS.forEach(r => ribbon(r[0], r[1], r[2], r[3]));
 
 /* ---------- sky, sun, light ---------- */
 {
@@ -228,8 +250,6 @@ put(box(4, 2.6, 3, 0xe6c98f), 12, 9, 0);
 { const grp = new THREE.Group(), b = box(15, 2.5, 4.2, 0xf1eee6), r = box(15.6, .35, 4.8, 0x9c3b2e); r.position.y = 2.5; grp.add(b, r); put(grp, -95, -22, 0.1); }
 // cream gazebo tent beside the white building in the yard
 { const grp = new THREE.Group(), b = box(4, 2.1, 4, 0xe9dfb8), r = new THREE.Mesh(new THREE.ConeGeometry(3.1, 1.4, 4), lam(0xe9dfb8)); r.rotation.y = Math.PI / 4; r.position.y = 2.8; r.castShadow = true; grp.add(b, r); put(grp, 25, -8, 0.08); }
-// stacked materials east of the yard buildings
-[[58, -12, 0x8a6a48], [63, -15, 0x6f7376], [60, -19, 0xa8562f]].forEach(([x, n, c]) => put(box(3.5, 1, 2, c), x, n, rnd() * 3));                       // cream hut by the parking
 put(box(.6, .85, .6, 0xf7f7f7), 14.6, 8, 0);                   // washing machine outside it
 put(box(4.5, 2.6, 3.2, 0xf3f2ee), -58, 44, 0.3);               // small white shed north-west of the barn
 { const pg = new THREE.Group(), roof = new THREE.Mesh(new THREE.PlaneGeometry(9, 5), lam(0x4a3d33, { side: THREE.DoubleSide })); roof.rotation.x = -Math.PI / 2; roof.position.y = 2.7; roof.castShadow = true; pg.add(roof);
@@ -255,29 +275,25 @@ put(tower(), 66, -24); put(tower(), 71, -25);
   for (const x of [-1, 1]) { const l = box(.1, .45, .6, w); l.position.x = x; grp.add(l); } put(grp, -246, 25, Math.PI / 2 + .1); }
 
 /* ---------- surroundings ---------- */
-// hilltop post on the ridge north of the road (crest at 543 m)
-[[-40, 452, 9, 0], [-28, 446, 7, .3], [-55, 444, 6, -.2]].forEach(([x, n, l, r]) => put(box(l, 2.8, 4, 0xf0efe9), x, n, r));
-[[-20, 456, 16], [-48, 460, 22], [-66, 448, 12]].forEach(([x, n, h]) => put(box(.25, h, .25, 0x7c8084), x, n));
-{ const t = box(2.5, 6, 2.5, 0x8d9296); put(t, -8, 448); put(box(3.2, 1.6, 3.2, 0x9a927d), -8, 448, 0, 6); }
-// village on the east hill (summit 563 m) with minaret
-for (let i = 0; i < 150; i++) { const a = rnd() * 6.283, r = Math.sqrt(rnd()) * 240, x = 740 + Math.cos(a) * r, n = 50 + Math.sin(a) * r * 1.1, w = 9 + rnd() * 9;
-  if (H(x, n) > 22 && Math.abs(x) < 980 && distPoly(x, n, paved) > 14) put(box(w, 5 + rnd() * 7, 8 + rnd() * 8, rnd() < .5 ? 0xe4dccb : 0xd3cab8, false), x, n, rnd() * 3); }
-put(box(14, 22, 14, 0xdcd4c2, false), 735, 65);
-{ const m = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2, 38, 10), lam(0xe9e2d2)); m.geometry.translate(0, 19, 0); put(m, 790, 25); const tip = new THREE.Mesh(new THREE.ConeGeometry(2.2, 7, 10), lam(0x7a8f86)); put(tip, 790, 25, 0, 41); }
-// neighbouring homes to the east and south-east of the farm
-ribbon([[150, -22], [200, -34], [260, -42], [320, -26], [390, -44], [470, -30]], 5, 0xcfc8b8, .3);
-[[178, -20, 12, 3.2, 9, 0xeeeae0], [196, -52, 10, 3, 8, 0xeeeae0], [214, -18, 16, 3.5, 9, 0x4a4f55], [232, -58, 22, 3.2, 8, 0x3f4a44], [250, -22, 11, 5.5, 10, 0xe6e0d2], [268, -60, 12, 3, 8, 0xeeeae0],
- [286, -12, 10, 3, 8, 0xd8d2c4], [300, -48, 18, 3.4, 9, 0x4a4f55], [322, -8, 12, 5.8, 10, 0xe6e0d2], [340, -62, 10, 3, 8, 0xeeeae0], [362, -26, 11, 3.2, 8, 0xd8d2c4], [205, 6, 9, 2.8, 4, 0xf3f2ee], [240, 10, 9, 2.8, 4, 0xf3f2ee],
- [150, -62, 10, 2.8, 3.6, 0xf3f2ee], [164, -58, 10, 2.8, 3.6, 0xf3f2ee]].forEach(([x, n, w, h, d, c]) => put(box(w, h, d, c), x, n, (rnd() - .5) * .5));
-// street lights along the paved road
-{ const cv = new THREE.CatmullRomCurve3(paved.map(([x, n]) => new THREE.Vector3(x, 0, n))), K = Math.floor(cv.getLength() / 60);
-  for (let k = 1; k < K; k++) { const p = cv.getPointAt(k / K), t = cv.getTangentAt(k / K), x = p.x - t.z * 6, n = p.z + t.x * 6; if (Math.abs(x) > 600) continue; put(box(.18, 8, .18, 0x8d9296, false), x, n); } }
+// army post on the ridge north of Road 465 (crest at 543 m), laid out from the satellite image
+[[-77, 484, 36, 16], [-47, 462, 20, 50], [-20, 473, 24, 54], [-80, 440, 18, 24]].forEach(([cx, cn, w, d]) => {
+  if (w > d) for (let n = cn - d / 2 + 2; n < cn + d / 2; n += 6) put(box(w, 2.8, 4.2, 0xf0efe9), cx, n, 0);
+  else for (let x = cx - w / 2 + 2; x < cx + w / 2; x += 6) put(box(4.2, 2.8, d, 0xf0efe9), x, cn, 0); });
+{ const v = []; for (let k = 0; k < 48; k++) { const a0 = k / 48 * 6.2832, a1 = (k + 1) / 48 * 6.2832, p0 = P(-59 + Math.cos(a0) * 70, 462 + Math.sin(a0) * 60, 2.2), p1 = P(-59 + Math.cos(a1) * 70, 462 + Math.sin(a1) * 60, 2.2);
+    v.push(...p0.toArray(), ...p1.toArray(), p0.x, p0.y - 2.2, p0.z, p0.x, p0.y, p0.z); }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); scene.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x5d6164 }))); }
+[[-30, 500, 18], [-95, 470, 22], [-60, 425, 12]].forEach(([x, n, h]) => put(box(.25, h, .25, 0x7c8084), x, n));
+{ const t = box(2.5, 6, 2.5, 0x8d9296); put(t, 2, 432); put(box(3.2, 1.6, 3.2, 0x9a927d), 2, 432, 0, 6); }
+// houses of Al-Hossa and the edge of Deir Nidham
+HOUSES.forEach(([x, n, big]) => put(box(big ? 20 : 10 + rnd() * 3, big ? 5 : 3.5 + rnd() * 3.5, big ? 13 : 9 + rnd() * 2, rnd() < .6 ? 0xeeeae0 : 0xdcd4c2), x, n, Math.floor(rnd() * 4) * .4));
+{ const v = [], pts = [[488, -321], [528, -253], [566, -271], [551, -346], [488, -321]]; for (let i = 0; i < 4; i++) v.push(...P(pts[i][0], pts[i][1], 1.5).toArray(), ...P(pts[i + 1][0], pts[i + 1][1], 1.5).toArray());
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); scene.add(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0x2c2c2c }))); }
 
 /* ---------- vegetation and rocks (instanced) ---------- */
 function scatter(geo, mat, items, shadow) { items = items.filter(t => Math.abs(t[0]) < 985 && Math.abs(t[1]) < 985); const im = new THREE.InstancedMesh(geo, mat, items.length), d = new THREE.Object3D();
   items.forEach((t, i) => { d.position.copy(P(t[0], t[1], t[3] || 0)); d.scale.set(t[2], t[2] * (t[4] || 1), t[2]); d.rotation.y = rnd() * 6; d.updateMatrix(); im.setMatrixAt(i, d.matrix); if (t[5]) im.setColorAt(i, t[5]); });
-  im.castShadow = !!shadow; im.receiveShadow = false; scene.add(im); return im; }
-const clear = (x, n) => !(x > 140 && x < 380 && n > -75 && n < 22) && !(x > -108 && x < -82 && n > -30 && n < -14) && !(x > 10 && x < 66 && n > -84 && n < -64) && Math.hypot(x + 215, n - 23) > 45 && distPoly(x, n, road1) > 6 && distPoly(x, n, road2) > 5 && distPoly(x, n, paved) > 8 && !(x > -70 && x < 110 && n > -50 && n < 58);
+  im.castShadow = !!shadow; im.receiveShadow = false; scene.add(im); veg.push(im); return im; }
+const clear = (x, n) => !(x > -108 && x < -82 && n > -30 && n < -14) && !(x > 10 && x < 66 && n > -84 && n < -64) && Math.hypot(x + 215, n - 23) > 45 && !nearRoad(x, n) && !(x > -70 && x < 110 && n > -50 && n < 58) && Math.hypot((x + 59) / 72, (n - 462) / 62) > 1 && HOUSES.every(h => Math.hypot(x - h[0], n - h[1]) > 14);
 { // olives on terraces
   const it = [], c1 = new THREE.Color(0x6f7d55), c2 = new THREE.Color(0x58683f);
   for (let x = -330; x < 180; x += 9) for (let n = -150; n < 152; n += 9) { const px = x + (rnd() - .5) * 5, pn = n + (rnd() - .5) * 4; if (olive(px, pn) && clear(px, pn) && rnd() > .12) it.push([px, pn, 1.6 + rnd() * .9, 1.2, .8, c1.clone().lerp(c2, rnd())]); }
@@ -287,11 +303,11 @@ const clear = (x, n) => !(x > 140 && x < 380 && n > -75 && n < 22) && !(x > -108
 { // pines on the viewpoint hill's north side, the post hill and scattered slopes
   const it = [], c1 = new THREE.Color(0x3f6a35), c2 = new THREE.Color(0x56873b);
   const add = (cx, cn, sx, sn, k) => { for (let i = 0; i < k; i++) { const x = cx + (rnd() - .5) * sx, n = cn + (rnd() - .5) * sn; if (clear(x, n) && !olive(x, n) && Math.hypot(x + 200, n - 22) > 50 && !(x < -200 && Math.abs(n - 22) < 70)) it.push([x, n, 1.3 + rnd() * 1.1, 0, 2 + rnd() * .8, c1.clone().lerp(c2, rnd())]); } };
-  add(-300, 60, 220, 150, 170); add(-270, -90, 200, 120, 90); add(-120, 430, 260, 160, 150); add(-500, 520, 400, 300, 130); add(120, -220, 300, 160, 90); add(-560, -430, 380, 300, 220); add(-700, 80, 400, 300, 110); add(500, -600, 500, 400, 120);
+  add(-240, 180, 90, 150, 90); add(-160, 485, 80, 130, 70); add(45, 445, 60, 70, 35); add(-560, -430, 380, 300, 160);
   const geo = new THREE.ConeGeometry(1, 2, 7); geo.translate(0, 1, 0); scatter(geo, new THREE.MeshLambertMaterial({ flatShading: true }), it, true);
 }
 { // cypress by the neighbouring homes
-  const it = []; for (let i = 0; i < 34; i++) { const x = 165 + rnd() * 200, n = -70 + rnd() * 85; it.push([x, n, 1.1, 0, 5 + rnd() * 2, new THREE.Color(rnd() < .15 ? 0xb9a437 : 0x2f4a2c)]); }
+  const it = []; for (let i = 0; i < 30; i++) { const x = 60 + rnd() * 200, n = -260 + rnd() * 140; it.push([x, n, 1.1, 0, 5 + rnd() * 2, new THREE.Color(rnd() < .15 ? 0xb9a437 : 0x2f4a2c)]); }
   const geo = new THREE.ConeGeometry(1, 2, 8); geo.translate(0, 1, 0); scatter(geo, new THREE.MeshLambertMaterial(), it, true);
 }
 { // dry scrub and limestone
@@ -303,12 +319,13 @@ const clear = (x, n) => !(x > 140 && x < 380 && n > -75 && n < 22) && !(x > -108
 }
 { // a few sheep in the pen
   const it = []; for (let i = 0; i < 9; i++) it.push([-45 + rnd() * 12, 24 + rnd() * 16, .45, .5, .8, new THREE.Color(i % 4 ? 0xeeeadf : 0x2b2b2b)]);
-  scatter(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshLambertMaterial(), it, true);
+  scatter(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshLambertMaterial(), it, true); veg.pop();
 }
 
 /* ---------- labels ---------- */
-const labelDefs = [['Sheep barn', -12, 30, 11], ['Feed silo and flag', 4, 17, 15], ['China Shipping container', 58, 16, 6], ['Red container', -62, 12, 6],
-  ['Caravans', 45, -74, 7], ['Red-roofed shed', -95, -22, 6], ['Neighbouring buildings', 260, -35, 16], ['Playground and solar', 69, -26, 7], ['Olive terraces', -40, 100, 10], ['Paved road · valley 484 m', 0, 200, 12], ['Hilltop post · 543 m', -40, 452, 26], ['Village and minaret · 563 m', 760, 45, 60], ['Hill · 546 m', -520, -440, 14], ['Wadi floor · 335 m', 0, -900, 14]];
+const labelDefs = [['Lookout point · 525 m', -200, 25, 6], ['Sheep barn', -12, 30, 11], ['Feed silo and flag', 4, 17, 15], ['China Shipping container', 58, 16, 6], ['Red container', -62, 12, 6],
+  ['Caravans', 45, -74, 7], ['Red-roofed shed', -95, -22, 6], ['Playground and solar', 69, -26, 7], ['Olive terraces', -60, 120, 10], ['Road 465', 85, 325, 12], ['Road 450', 500, -750, 12], ['Army post · 543 m', -59, 462, 26],
+  ['Hill · 563 m', 750, 50, 12], ['Al-Hossa houses', 300, -240, 18], ['Deir Nidham', 950, -335, 24], ['Hill · 546 m', -520, -440, 14], ['Wadi floor · 335 m', -60, -935, 14]];
 const labelBox = document.getElementById('labels');
 const labels = labelDefs.map(([t, x, n, dy]) => { const el = document.createElement('div'); el.className = 'lbl'; el.textContent = t; labelBox.appendChild(el); return { el, p: P(x, n, dy) }; });
 let showLabels = true; const tmp = new THREE.Vector3();
@@ -334,7 +351,22 @@ function go(name, instant) { const [p, t] = views[name]; controls.autoRotate = n
 document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
 controls.addEventListener('start', () => { controls.autoRotate = false; tween = null; document.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', 'false')); });
 const lblbtn = document.getElementById('lblbtn'); lblbtn.addEventListener('click', () => { showLabels = !showLabels; lblbtn.setAttribute('aria-pressed', showLabels); });
-const ctrbtn = document.getElementById('ctrbtn'); ctrbtn.addEventListener('click', () => { contourU.value = contourU.value ? 0 : 1; ctrbtn.setAttribute('aria-pressed', !!contourU.value); });
+// numbers on the 400 m and 500 m contour lines
+const ctrNums = new THREE.Group(); scene.add(ctrNums);
+for (const lev of [400, 500]) { const y = lev - Z0, pts = [], chosen = [];
+  for (let n = -940; n <= 940; n += 20) for (let x = -940; x < 940; x += 20) { const a = H(x, n) - y, b = H(x + 20, n) - y; if (a * b < 0) pts.push([x + 20 * a / (a - b), n]); }
+  for (const p of pts) if (chosen.every(q => Math.hypot(p[0] - q[0], p[1] - q[1]) > 300)) chosen.push(p);
+  const cv = document.createElement('canvas'); cv.width = 192; cv.height = 80; const c2 = cv.getContext('2d'); c2.font = '600 46px sans-serif'; c2.textAlign = 'center'; c2.textBaseline = 'middle';
+  c2.lineWidth = 9; c2.strokeStyle = 'rgba(20,14,8,.9)'; c2.strokeText(lev + ' m', 96, 42); c2.fillStyle = '#fff4d6'; c2.fillText(lev + ' m', 96, 42);
+  const mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, sizeAttenuation: false, fog: false, depthTest: false });
+  for (const p of chosen) { const s = new THREE.Sprite(mat); s.scale.set(.072, .03, 1); s.position.copy(P(p[0], p[1], 4)); ctrNums.add(s); } }
+const ctrbtn = document.getElementById('ctrbtn'); ctrbtn.addEventListener('click', () => { contourU.value = contourU.value ? 0 : 1; ctrNums.visible = !!contourU.value; ctrbtn.setAttribute('aria-pressed', !!contourU.value); });
+// satellite photo draped on the ground, where the browser is allowed to load it (the public web link; not inside Claude)
+const satbtn = document.getElementById('satbtn'), attr = document.getElementById('attr'); let satMat = null, satOn = false;
+function setSat(on) { satOn = on; terrain.material = on ? satMat : tmat; veg.forEach(v => v.visible = !on); satbtn.setAttribute('aria-pressed', on); attr.hidden = !on; }
+satbtn.addEventListener('click', () => setSat(!satOn));
+new THREE.TextureLoader().setCrossOrigin('anonymous').load('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=35.0899,31.9958,35.1111,32.0138&bboxSR=4326&imageSR=4326&size=2048,1739&format=jpg&f=image', tex => {
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; satMat = new THREE.MeshLambertMaterial({ map: tex, color: 0xb4b4b4 }); satMat.onBeforeCompile = tmat.onBeforeCompile; satbtn.hidden = false; setSat(true); }, undefined, () => {});
 document.getElementById('more').addEventListener('click', () => document.getElementById('card').classList.toggle('open'));
 go('overview', true);
 
