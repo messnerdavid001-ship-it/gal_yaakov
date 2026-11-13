@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gal Yaakov Photos</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+<link rel="stylesheet" href="css/gallery.css">
+</head>
+<body>
+<header class="top">
+  <h1>Gal Yaakov</h1>
+  <nav class="nav" aria-label="Site"><a href="index.html">3D map</a><a href="gallery.html" aria-current="page">Photos</a></nav>
+</header>
+<main>
+  <p class="lede">Photos from the site. Tap a photo to see it full size.</p>
+  <div class="grid">
+    <figure><a href="img/olive-terraces.jpg" data-full="img/olive-terraces.jpg"><img src="img/olive-terraces-thumb.jpg" alt="Olive terraces below the farm, seen from across the valley" loading="lazy" width="1600" height="1200"></a><figcaption>Olive terraces below the farm, seen from across the valley</figcaption></figure>
+    <figure><a href="img/valley-view.jpg" data-full="img/valley-view.jpg"><img src="img/valley-view-thumb.jpg" alt="The farm on its saddle, with the lookout hill to the right" loading="lazy" width="1600" height="1200"></a><figcaption>The farm on its saddle, with the lookout hill to the right</figcaption></figure>
+    <figure><a href="img/sunrise.jpg" data-full="img/sunrise.jpg"><img src="img/sunrise-thumb.jpg" alt="Sunrise over the farm from the lookout" loading="lazy" width="1600" height="1200"></a><figcaption>Sunrise over the farm from the lookout</figcaption></figure>
+    <figure><a href="img/barn.jpg" data-full="img/barn.jpg"><img src="img/barn-thumb.jpg" alt="The sheep barn from the lane" loading="lazy" width="1200" height="1600"></a><figcaption>The sheep barn from the lane</figcaption></figure>
+    <figure><a href="img/track.jpg" data-full="img/track.jpg"><img src="img/track-thumb.jpg" alt="The dirt track along the ridge" loading="lazy" width="1200" height="1600"></a><figcaption>The dirt track along the ridge</figcaption></figure>
+  </div>
+</main>
+<div class="viewer" id="viewer" hidden>
+  <button type="button" id="close" aria-label="Close photo">Close</button>
+  <img id="big" alt="">
+  <p id="cap"></p>
+</div>
+<script src="js/gallery.js"></script>
+</body>
+</html>
