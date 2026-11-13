@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { DEM, G, CELL, Z0, HALF, road1, r465, r450, paved, ROADS, HOUSES, labelDefs } from './data.js';
 import { stage, canvas, renderer, scene, HAZE, camera, rnd, g, sstep, hash, vnoise, fbm, dem, dv, cr, H, P, lam, put, box, contourU, veg, nearRoad, distPoly, olive } from './core.js';
 
-let terrain, tmat;
+let terrain, tmat; const roadMeshes = [];
 {
   const S = 250, geo = new THREE.PlaneGeometry(1, 1, S, S), pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
   const c = new THREE.Color(), tan = new THREE.Color(0x9a8a62), green = new THREE.Color(0x5f6b3c), red = new THREE.Color(0x8a5a3c), rock = new THREE.Color(0xb9b3a4), grav = new THREE.Color(0xb7a98a), dark = new THREE.Color(0x4a5433);
@@ -41,9 +41,9 @@ function ribbon(pts, w, color, lift) {
     for (const s of [-1, 1]) { const x = p.x + nx * s * w / 2, n = p.z + nn * s * w / 2; v.push(x, Math.max(H(x, n), H(p.x, p.z)) + lift, -n); }
     if (i < N) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } }
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(v, 3)); geo.setIndex(idx); geo.computeVertexNormals();
-  const m = new THREE.Mesh(geo, lam(color, { side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })); m.receiveShadow = true; scene.add(m);
+  const m = new THREE.Mesh(geo, lam(color, { side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 })); m.receiveShadow = true; scene.add(m); roadMeshes.push(m);
 }
 ROADS.forEach(r => ribbon(r[0], r[1], r[2], r[3]));
 
 
-export { terrain, tmat, ribbon };
+export { terrain, tmat, ribbon, roadMeshes };

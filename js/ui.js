@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { DEM, G, CELL, Z0, HALF, road1, r465, r450, paved, ROADS, HOUSES, labelDefs } from './data.js';
 import { stage, canvas, renderer, scene, HAZE, camera, rnd, g, sstep, hash, vnoise, fbm, dem, dv, cr, H, P, lam, put, box, contourU, veg, nearRoad, distPoly, olive } from './core.js';
-import { terrain, tmat } from './terrain.js';
+import { terrain, tmat, roadMeshes } from './terrain.js';
 import { placeLabels } from './pins.js';
 
 const tmp = new THREE.Vector3();
@@ -36,11 +36,22 @@ for (const lev of [400, 500]) { const y = lev - Z0, pts = [], chosen = [];
   for (const p of chosen) { const s = new THREE.Sprite(mat); s.scale.set(.072, .03, 1); s.position.copy(P(p[0], p[1], 4)); ctrNums.add(s); } }
 const ctrbtn = document.getElementById('ctrbtn'); ctrbtn.addEventListener('click', () => { contourU.value = contourU.value ? 0 : 1; ctrNums.visible = !!contourU.value; ctrbtn.setAttribute('aria-pressed', !!contourU.value); });
 // satellite photo draped on the ground, where the browser is allowed to load it (the public web link; not inside Claude)
-const satbtn = document.getElementById('satbtn'), attr = document.getElementById('attr'); let satMat = null, satOn = false;
-function setSat(on) { satOn = on; terrain.material = on ? satMat : tmat; veg.forEach(v => v.visible = !on); satbtn.setAttribute('aria-pressed', on); attr.hidden = !on; }
-satbtn.addEventListener('click', () => setSat(!satOn));
-new THREE.TextureLoader().setCrossOrigin('anonymous').load('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=35.0899,31.9958,35.1111,32.0138&bboxSR=4326&imageSR=4326&size=2048,1739&format=jpg&f=image', tex => {
-  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 8; satMat = new THREE.MeshLambertMaterial({ map: tex, color: 0xb4b4b4 }); satMat.onBeforeCompile = tmat.onBeforeCompile; satbtn.hidden = false; setSat(true); }, undefined, () => {});
+// Satellite layer: the real photo draped on the ground. It is fetched the first time the button is pressed,
+// drawn unlit (the photo already has its own light and shadow), and replaces the drawn roads and trees while on.
+const SAT_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=35.0899,31.9958,35.1111,32.0138&bboxSR=4326&imageSR=4326&size=2048,1739&format=jpg&f=image';
+const satbtn = document.getElementById('satbtn'), attr = document.getElementById('attr'); let satMat = null, satOn = false, satState = 'idle';
+function setSat(on) { satOn = on; terrain.material = on ? satMat : tmat; veg.forEach(v => v.visible = !on); roadMeshes.forEach(m => m.visible = !on); satbtn.setAttribute('aria-pressed', on); attr.hidden = !on; }
+satbtn.hidden = false;
+satbtn.addEventListener('click', () => {
+  if (satState === 'ready') return setSat(!satOn);
+  if (satState !== 'idle') return;
+  satState = 'loading'; satbtn.textContent = 'Loading…';
+  new THREE.TextureLoader().setCrossOrigin('anonymous').load(SAT_URL, tex => {
+    tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    satMat = new THREE.MeshBasicMaterial({ map: tex }); satMat.onBeforeCompile = tmat.onBeforeCompile;
+    renderer.initTexture(tex); satState = 'ready'; satbtn.textContent = 'Satellite'; setSat(true);
+  }, undefined, () => { satState = 'failed'; satbtn.textContent = 'Satellite unavailable'; satbtn.disabled = true; });
+});
 document.getElementById('more').addEventListener('click', () => document.getElementById('card').classList.toggle('open'));
 go('overview', true);
 
