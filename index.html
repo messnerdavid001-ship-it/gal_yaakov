@@ -342,7 +342,7 @@ const labelDefs = [['Lookout point · 525 m', -200, 25, 6],
   ['Road 465', 85, 325, 12], ['Road 450', 500, -750, 12], ['Army post · 543 m', -59, 462, 26],
   ['Hill · 563 m', 750, 50, 12], ['Deir Nidham (Area C)', 300, -240, 18], ['Deir Nidham', 950, -335, 24], ['Hill · 546 m', -520, -440, 14], ['Wadi floor · 335 m', -60, -935, 14]];
 const labelBox = document.getElementById('labels');
-const labels = labelDefs.map(([t, x, n, dy]) => { const el = document.createElement('div'); el.className = 'lbl'; el.textContent = t; labelBox.appendChild(el); return { el, p: P(x, n, dy) }; });
+const labels = [];   // filled below: every pin, mine and the viewer's, is the same editable kind
 let showLabels = true; const tmp = new THREE.Vector3();
 function placeLabels(w, h) { for (const l of labels) { tmp.copy(l.p).project(camera); const ok = showLabels && tmp.z < 1 && tmp.z > -1 && Math.abs(tmp.x) < 1.05 && Math.abs(tmp.y) < 1.05 && camera.position.distanceTo(l.p) > 25;
   l.el.hidden = !ok; if (ok) l.el.style.transform = `translate(-50%,-100%) translate(${((tmp.x + 1) / 2 * w).toFixed(1)}px,${((1 - tmp.y) / 2 * h - 14).toFixed(1)}px)`; } }
@@ -388,10 +388,10 @@ go('overview', true);
 /* ---------- labels the viewer adds ---------- */
 const addbtn = document.getElementById('addbtn'), hint = document.getElementById('hint'), nameform = document.getElementById('nameform'), nameinput = document.getElementById('labelname');
 let adding = false, pending = null, downAt = null; const ray = new THREE.Raycaster();
-const saveCustom = () => { try { localStorage.setItem('gal-yaakov-labels', JSON.stringify(labels.filter(l => l.custom).map(l => [l.t, l.base.x, l.base.y, l.base.z]))); } catch (e) {} };
-function addCustom(t, base) { const el = document.createElement('div'); el.className = 'lbl custom'; const sp = document.createElement('span'); sp.textContent = t;
+const saveCustom = () => { try { localStorage.setItem('gal-yaakov-pins', JSON.stringify(labels.map(l => [l.t, l.base.x, l.base.y, l.base.z, l.lift]))); } catch (e) {} };
+function addCustom(t, base, lift = 8) { const el = document.createElement('div'); el.className = 'lbl custom'; const sp = document.createElement('span'); sp.textContent = t;
   const x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.hidden = true; x.setAttribute('aria-label', 'Remove label');
-  el.append(sp, x); labelBox.appendChild(el); const l = { el, sp, x, p: base.clone().add(new THREE.Vector3(0, 8, 0)), base: base.clone(), custom: true, t }; labels.push(l);
+  el.append(sp, x); labelBox.appendChild(el); const l = { el, sp, x, p: base.clone().add(new THREE.Vector3(0, lift, 0)), base: base.clone(), lift, custom: true, t }; labels.push(l);
   el.addEventListener('click', e => { if (!editing || e.target === x) return; select(l); });
   x.addEventListener('click', () => { labels.splice(labels.indexOf(l), 1); el.remove(); saveCustom(); select(null); }); }
 const editbtn = document.getElementById('editbtn'); let editing = false, selected = null;
@@ -399,7 +399,7 @@ function select(l) { if (selected) { selected.el.classList.remove('sel'); select
   if (l) { l.el.classList.add('sel'); l.x.hidden = false; pending = null; nameform.hidden = false; hint.hidden = true; nameinput.value = l.t; nameinput.focus(); }
   else { nameform.hidden = true; hint.hidden = !adding; } }
 function setEditing(on) { editing = on; labelBox.classList.toggle('editing', on); editbtn.textContent = on ? 'Done editing' : 'Edit labels'; editbtn.setAttribute('aria-pressed', on);
-  hint.textContent = on ? 'Tap one of your labels to rename or remove it' : 'Tap the ground to place a label'; canvas.style.cursor = adding && !on ? 'crosshair' : ''; pending = null; select(null); }
+  hint.textContent = on ? 'Tap any label to rename or remove it' : 'Tap the ground to place a label'; canvas.style.cursor = adding && !on ? 'crosshair' : ''; pending = null; select(null); }
 function setAdding(on) { adding = on; addbtn.textContent = on ? 'Stop adding' : 'Add label'; addbtn.setAttribute('aria-pressed', on); editbtn.hidden = !on; setEditing(false); }
 addbtn.addEventListener('click', () => setAdding(!adding));
 editbtn.addEventListener('click', () => setEditing(!editing));
@@ -412,7 +412,11 @@ nameform.addEventListener('submit', e => { e.preventDefault(); const t = nameinp
   if (t && selected) { selected.t = t; selected.sp.textContent = t; saveCustom(); select(null); return; }
   if (t && pending) { addCustom(t, pending); saveCustom(); if (!showLabels) lblbtn.click(); } nameform.hidden = true; pending = null; hint.hidden = !adding; });
 document.getElementById('namecancel').addEventListener('click', () => { if (selected) return select(null); nameform.hidden = true; pending = null; hint.hidden = !adding; });
-try { for (const [t, x, y, z] of JSON.parse(localStorage.getItem('gal-yaakov-labels') || '[]')) addCustom(String(t), new THREE.Vector3(x, y, z)); } catch (e) {}
+{ // saved pins if this browser has any; otherwise the built-in set plus any pins added before this version
+  let saved = null, old = [];
+  try { saved = JSON.parse(localStorage.getItem('gal-yaakov-pins')); old = JSON.parse(localStorage.getItem('gal-yaakov-labels') || '[]'); } catch (e) {}
+  if (Array.isArray(saved)) for (const [t, x, y, z, lift] of saved) addCustom(String(t), new THREE.Vector3(x, y, z), lift || 8);
+  else { for (const [t, x, n, dy] of labelDefs) addCustom(t, P(x, n, 0), dy); if (Array.isArray(old)) for (const [t, x, y, z] of old) addCustom(String(t), new THREE.Vector3(x, y, z)); } }
 
 const needle = document.getElementById('needle'); let W = 0, Hh = 0;
 function frame() {
